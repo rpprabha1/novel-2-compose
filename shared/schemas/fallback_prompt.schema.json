@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "fallback_prompt.schema.json",
+  "title": "FallbackPrompt",
+  "description": "Agent half of 06_fallback_generation's output - image-generation prompts per beat, before rendering.",
+  "type": "object",
+  "required": ["run_id", "scene_id", "prompts"],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": { "type": "string" },
+    "scene_id": { "type": "string" },
+    "prompts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["beat_id", "image_prompt", "negative_prompt", "rationale"],
+        "additionalProperties": false,
+        "properties": {
+          "beat_id": { "type": "string" },
+          "image_prompt": { "type": "string" },
+          "negative_prompt": { "type": "string" },
+          "rationale": { "type": "string" }
+        }
+      }
+    }
+  }
+}

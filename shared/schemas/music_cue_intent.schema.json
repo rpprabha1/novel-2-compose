@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "music_cue_intent.schema.json",
+  "title": "MusicCueIntent",
+  "description": "Agent half of 09_audio_production's output - cue boundaries, mood, and intensity, before the code half searches for and shortlists real tracks (see audio_plan.schema.json for the merged final output).",
+  "type": "object",
+  "required": ["run_id", "scene_id", "cues"],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": { "type": "string" },
+    "scene_id": { "type": "string" },
+    "cues": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["cue_id", "start_beat_id", "end_beat_id", "mood_tags", "target_intensity", "rationale"],
+        "additionalProperties": false,
+        "properties": {
+          "cue_id": { "type": "string" },
+          "start_beat_id": { "type": "string" },
+          "end_beat_id": { "type": "string" },
+          "mood_tags": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "target_intensity": { "type": "number", "minimum": 0, "maximum": 1 },
+          "rationale": { "type": "string" }
+        }
+      }
+    }
+  }
+}

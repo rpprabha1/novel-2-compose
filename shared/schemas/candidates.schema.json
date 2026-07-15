@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "candidates.schema.json",
+  "title": "Candidates",
+  "type": "object",
+  "required": ["run_id", "scene_id", "candidates_by_beat"],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": { "type": "string" },
+    "scene_id": { "type": "string" },
+    "candidates_by_beat": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["beat_id", "search_terms", "candidates"],
+        "additionalProperties": false,
+        "properties": {
+          "beat_id": { "type": "string" },
+          "search_terms": { "type": "array", "items": { "type": "string" } },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["candidate_id", "source", "url", "license", "thumbnail_ref"],
+              "additionalProperties": false,
+              "properties": {
+                "candidate_id": { "type": "string" },
+                "source": { "type": "string", "enum": ["pexels", "pixabay", "mixkit", "coverr", "archive_org", "wikimedia_commons", "nasa", "author_library"] },
+                "url": { "type": "string", "format": "uri" },
+                "license": { "type": "string" },
+                "creator": { "type": "string" },
+                "thumbnail_ref": { "type": "string" },
+                "download_url": { "type": "string", "format": "uri", "description": "Direct video file URL, if the source provides one; used by 05_retrieval_verification to download for frame sampling" },
+                "duration_s": { "type": "number", "exclusiveMinimum": 0 },
+                "similarity_score": { "type": "number", "minimum": -1, "maximum": 1, "description": "Cosine similarity; populated by 04_clip_reranking, absent at fetch time" }
+              }
+            }
+          },
+          "routing": {
+            "type": "object",
+            "description": "Populated by 04_clip_reranking; absent at fetch time (03's raw output).",
+            "required": ["route", "best_score", "retrievable"],
+            "additionalProperties": false,
+            "properties": {
+              "route": { "type": "string", "enum": ["05_retrieval_verification", "06_fallback_generation"] },
+              "best_score": { "type": "number", "minimum": -1, "maximum": 1 },
+              "retrievable": { "type": "string", "enum": ["high", "low", "none"], "description": "low = within config/thresholds.yaml's close_score_margin of the cutoff, routed to 05 but flagged for HITL tie-break" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "qa_report.schema.json",
+  "title": "QAReport",
+  "type": "object",
+  "required": ["run_id", "scene_id", "checks", "pass"],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": { "type": "string" },
+    "scene_id": { "type": "string" },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "pass", "detail"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "enum": ["schema_validation", "attribution_completeness", "duration_tolerance", "loudness_spec"] },
+          "pass": { "type": "boolean" },
+          "detail": { "type": "string" }
+        }
+      }
+    },
+    "pass": { "type": "boolean", "description": "True only if every check passes" }
+  }
+}

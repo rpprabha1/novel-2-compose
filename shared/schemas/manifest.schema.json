@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "manifest.schema.json",
+  "title": "RunManifest",
+  "description": "Accumulated across a run at every stage; the authoritative attribution + provenance record. Appended to, never overwritten.",
+  "type": "object",
+  "required": ["run_id", "entries"],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": { "type": "string" },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["entry_id", "kind", "fetched_by_stage", "fetched_at", "source", "license"],
+        "additionalProperties": false,
+        "properties": {
+          "entry_id": { "type": "string" },
+          "kind": { "type": "string", "enum": ["footage", "music", "generated_image"] },
+          "fetched_by_stage": { "type": "string", "pattern": "^[0-9]{2}_[a-z_]+$" },
+          "fetched_at": { "type": "string", "format": "date-time" },
+          "source": { "type": "string" },
+          "source_url": { "type": "string", "format": "uri" },
+          "creator": { "type": "string" },
+          "license": { "type": "string" },
+          "attribution_required": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

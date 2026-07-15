@@ -1,0 +1,10 @@
+# embeddings.yaml — CLIP model configuration for 04_clip_reranking.
+#
+# openai/clip-vit-base-patch32 chosen as the smallest widely-supported CLIP
+# variant (~600MB) - fits the dev machine's CPU-only / ~8GB RAM constraints
+# (same reasoning as config/agents.yaml's model choice). Swap here, no code
+# change needed, if better hardware becomes available.
+
+clip:
+  model: openai/clip-vit-base-patch32
+  device: cpu

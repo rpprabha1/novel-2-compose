@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "audio_plan.schema.json",
+  "title": "AudioPlan",
+  "type": "object",
+  "required": ["run_id", "scene_id", "cues"],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": { "type": "string" },
+    "scene_id": { "type": "string" },
+    "cues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["cue_id", "start_beat_id", "end_beat_id", "mood_tags", "target_intensity", "candidate_shortlist", "rationale"],
+        "additionalProperties": false,
+        "properties": {
+          "cue_id": { "type": "string" },
+          "start_beat_id": { "type": "string" },
+          "end_beat_id": { "type": "string" },
+          "mood_tags": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "From config/audio_spec.yaml tone->music-tag vocabulary"
+          },
+          "target_intensity": { "type": "number", "minimum": 0, "maximum": 1, "description": "Position on run_config.music_intensity_curve" },
+          "candidate_shortlist": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 3,
+            "description": "2-3 candidates; final selection is a mandatory HITL decision",
+            "items": {
+              "type": "object",
+              "required": ["track_ref", "source", "license"],
+              "additionalProperties": false,
+              "properties": {
+                "track_ref": { "type": "string" },
+                "source": { "type": "string", "enum": ["pixabay_music", "mixkit", "generated"] },
+                "license": { "type": "string" }
+              }
+            }
+          },
+          "rationale": { "type": "string" }
+        }
+      }
+    }
+  }
+}

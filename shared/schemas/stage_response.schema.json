@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "stage_response.schema.json",
+  "title": "StageResponse",
+  "type": "object",
+  "required": ["envelope_id", "run_id", "stage", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "envelope_id": { "type": "string", "format": "uuid" },
+    "run_id": { "type": "string" },
+    "stage": { "type": "string", "pattern": "^[0-9]{2}_[a-z_]+$" },
+    "status": { "type": "string", "enum": ["COMPLETE", "NEEDS_INPUT", "FALLBACK_ROUTED", "FAILED"] },
+    "summary": { "type": "string" },
+    "output_manifest": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "needs_input": {
+      "type": "array",
+      "description": "Present only when status is NEEDS_INPUT",
+      "items": {
+        "type": "object",
+        "required": ["reason_code", "question", "options"],
+        "additionalProperties": false,
+        "properties": {
+          "reason_code": { "type": "string" },
+          "question": { "type": "string" },
+          "options": { "type": "array", "items": { "type": "string" } },
+          "context_ref": { "type": "string" }
+        }
+      }
+    },
+    "fallback_routed": {
+      "type": "array",
+      "description": "Present only when status is FALLBACK_ROUTED",
+      "items": {
+        "type": "object",
+        "required": ["item_id", "reason_code"],
+        "additionalProperties": false,
+        "properties": {
+          "item_id": { "type": "string" },
+          "reason_code": { "type": "string" },
+          "detail": { "type": "string" }
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "description": "Present only when status is FAILED",
+      "required": ["message"],
+      "additionalProperties": false,
+      "properties": {
+        "message": { "type": "string" },
+        "diagnostics": { "type": "string" }
+      }
+    }
+  }
+}

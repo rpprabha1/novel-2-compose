@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "edit_plan.schema.json",
+  "title": "EditPlan",
+  "type": "object",
+  "required": ["run_id", "scene_id", "beats"],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": { "type": "string" },
+    "scene_id": { "type": "string" },
+    "total_runtime_s": { "type": "number", "exclusiveMinimum": 0 },
+    "beats": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["beat_id", "asset_id", "shots"],
+        "additionalProperties": false,
+        "properties": {
+          "beat_id": { "type": "string" },
+          "asset_id": { "type": "string" },
+          "shots": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 12,
+            "description": "Subdivisions of the asset. >3 is a HITL trigger (CLAUDE.md section 4 / config/editorial_vocab.yaml's hitl_shot_subdivision_threshold) enforced in code, not by this schema - the schema only guards against a pathological/runaway count.",
+            "items": {
+              "type": "object",
+              "required": ["shot_id", "in_s", "out_s", "hold_duration_s"],
+              "additionalProperties": false,
+              "properties": {
+                "shot_id": { "type": "string" },
+                "in_s": { "type": "number", "minimum": 0, "description": "Start of the usable source window for this shot (the portion of the asset judged relevant)" },
+                "out_s": { "type": "number", "exclusiveMinimum": 0, "description": "End of the usable source window. This is an availability ceiling, not the actual trim point - 08_timeline_builder trims to [in_s, in_s + hold_duration_s], which must be <= out_s. out_s may exceed in_s + hold_duration_s (more usable footage was available than what's shown)." },
+                "hold_duration_s": { "type": "number", "exclusiveMinimum": 0, "description": "Actual on-screen duration - the authoritative value 08_timeline_builder uses to trim and place this shot. Must fall within config/editorial_vocab.yaml's allowed range for the active pacing preset, and must be <= (out_s - in_s)." }
+              }
+            }
+          },
+          "transition_out": {
+            "type": "string",
+            "description": "Transition to the next beat; must be a value from config/editorial_vocab.yaml transition_families"
+          },
+          "rationale": { "type": "string", "description": "One line, required for any non-default choice" }
+        }
+      }
+    }
+  }
+}

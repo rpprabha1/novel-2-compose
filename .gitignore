@@ -1,0 +1,31 @@
+# Run-generated state — never commit real run data (manuscript text, fetched
+# assets, generated audio/video). See CLAUDE.md fixture rule.
+shared/runs/*
+!shared/runs/.gitkeep
+
+# Per-stage input/output dirs are also covered by each stage's own
+# .gitignore, but keep a belt-and-suspenders top-level rule too.
+stages/*/inputs/
+stages/*/outputs/
+
+# Downloaded model weights - large binaries, re-downloadable (see each
+# config/*.yaml for the source). HuggingFace-cached CLIP/diffusion models
+# already live outside the repo in ~/.cache/huggingface; piper voices are
+# fetched into the repo tree so they need an explicit rule here.
+shared/models/
+
+# Secrets
+config/.env
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db

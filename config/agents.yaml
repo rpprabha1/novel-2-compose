@@ -1,0 +1,27 @@
+# agents.yaml — local LLM backend configuration for AGENT/HYBRID stages
+# (02_beat_extraction, 06_fallback_generation, 07_editorial_direction, 09_audio_production).
+#
+# Backend: Ollama, running locally. Model choice is sized to the actual
+# development machine (NVIDIA MX230, 2GB VRAM; ~8GB system RAM) - llama3.2:3b
+# is the largest model that comfortably fits that hardware. Swap per-stage or
+# globally as better hardware/models become available; no code change needed.
+
+backend: ollama
+
+ollama:
+  host: http://localhost:11434
+  default_model: llama3.2:3b
+  timeout_s: 480
+  # Ollama's structured-output mode: forces the model to emit valid JSON
+  # matching this pipeline's schemas rather than free text.
+  format: json
+  options:
+    temperature: 0.2
+    num_ctx: 4096
+
+# Per-stage override. Falls back to ollama.default_model if a stage isn't listed.
+stage_models:
+  02_beat_extraction: llama3.2:3b
+  06_fallback_generation: llama3.2:3b
+  07_editorial_direction: llama3.2:3b
+  09_audio_production: llama3.2:3b

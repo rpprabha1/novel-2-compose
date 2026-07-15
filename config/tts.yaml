@@ -1,0 +1,10 @@
+# tts.yaml — local TTS backend configuration for 09_audio_production's code half.
+#
+# piper-tts chosen for CPU feasibility: ONNX-based, small models (~60MB),
+# fast inference even on this hardware (~1-2s per sentence including model
+# load), noticeably more natural than classic offline TTS (same "fit the dev
+# machine" reasoning as config/agents.yaml / config/embeddings.yaml / config/image_gen.yaml).
+
+model_path: shared/models/piper/en_US-lessac-medium.onnx
+config_path: shared/models/piper/en_US-lessac-medium.onnx.json
+length_scale: 1.0

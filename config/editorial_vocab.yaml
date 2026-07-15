@@ -1,0 +1,25 @@
+# editorial_vocab.yaml — allowed transition families, shot-length ranges,
+# pacing presets. The 07_editorial_direction agent may ONLY choose values
+# from this file; it must never invent a transition type or exceed a
+# pacing preset's bounds (CLAUDE.md section 4).
+
+transition_families:
+  - hard-cut
+  - crossfade
+  - dip-to-black
+  - match-cut-suggestion
+
+pacing_presets:
+  slow-burn:
+    hold_duration_s: { min: 2.5, max: 6.0 }
+    max_shots_per_beat: 2
+  standard:
+    hold_duration_s: { min: 1.5, max: 4.0 }
+    max_shots_per_beat: 3
+  fast-cut:
+    hold_duration_s: { min: 0.5, max: 2.0 }
+    max_shots_per_beat: 3
+
+# Subdividing one asset into more than this many shots is always a HITL
+# trigger (CLAUDE.md section 4), independent of pacing preset.
+hitl_shot_subdivision_threshold: 3

@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "audio_mix.schema.json",
+  "title": "AudioMix",
+  "type": "object",
+  "required": ["run_id", "scene_id", "narration_stems", "music_stems", "mix_params", "final_lufs"],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": { "type": "string" },
+    "scene_id": { "type": "string" },
+    "narration_stems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["beat_id", "file_ref", "start_s", "duration_s"],
+        "additionalProperties": false,
+        "properties": {
+          "beat_id": { "type": "string" },
+          "file_ref": { "type": "string" },
+          "start_s": { "type": "number", "minimum": 0 },
+          "duration_s": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      }
+    },
+    "music_stems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["cue_id", "track_ref", "file_ref", "start_s", "duration_s", "selected_by"],
+        "additionalProperties": false,
+        "properties": {
+          "cue_id": { "type": "string" },
+          "track_ref": { "type": "string" },
+          "file_ref": { "type": "string" },
+          "start_s": { "type": "number", "minimum": 0 },
+          "duration_s": { "type": "number", "exclusiveMinimum": 0 },
+          "selected_by": { "type": "string", "description": "Human decided-by identifier, per DECISIONS_LOG.md entry" },
+          "crossfade_in_s": { "type": "number", "minimum": 0 },
+          "crossfade_out_s": { "type": "number", "minimum": 0 }
+        }
+      }
+    },
+    "mix_params": {
+      "type": "object",
+      "required": ["ducking_depth_db", "ducking_attack_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "ducking_depth_db": { "type": "number" },
+        "ducking_attack_ms": { "type": "number", "minimum": 0 }
+      }
+    },
+    "final_lufs": { "type": "number", "description": "Must match config/audio_spec.yaml target within QA tolerance" },
+    "total_duration_s": { "type": "number", "exclusiveMinimum": 0, "description": "Audio-driven scene runtime (sum of sequential, non-overlapping narration_stems durations) - may exceed the visual-only timeline.json's total_duration_s from 08_timeline_builder, which must be regenerated with stretched hold_duration_s per beat before 11_assembly_render." }
+  }
+}

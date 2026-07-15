@@ -1,0 +1,13 @@
+# image_gen.yaml — local diffusion backend configuration for
+# 06_fallback_generation's code half.
+#
+# stabilityai/sd-turbo chosen for CPU feasibility on the dev machine (2GB
+# VRAM, ~8GB RAM): a distilled few-step model, ~35-60s/image at 2 steps on
+# CPU vs. minutes for a full 20-50 step SD pipeline. Swap here, no code
+# change needed, if better hardware becomes available.
+
+model: stabilityai/sd-turbo
+device: cpu
+num_inference_steps: 2
+guidance_scale: 0.0
+image_size: 512

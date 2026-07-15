@@ -1,0 +1,40 @@
+# audio_spec.yaml — LUFS targets, ducking, crossfades, and the tone -> music
+# mood-tag mapping. The 09_audio_production agent may ONLY choose mood tags
+# listed here; mixing math (ducking, crossfades, normalization) is CODE and
+# reads these numbers, never hardcodes them (CLAUDE.md section 4).
+
+loudness:
+  target_lufs: -16.0
+  tolerance_lu: 1.0
+
+ducking:
+  depth_db: -12
+  attack_ms: 150
+  release_ms: 300
+
+crossfade:
+  default_length_s: 1.5
+
+# tone (from run_config.yaml) -> allowed music mood tags. Populated per-tone
+# as tones are actually used in a run; never branched on in code (CLAUDE.md
+# section 0 hard rule: genre/tone intent is data, not "if genre == ..." code).
+tone_music_tags:
+  gothic-suspense:
+    - tense
+    - quiet
+    - ominous
+    - sparse
+
+# mood tags available to 02_beat_extraction for beat-level tagging; the
+# audio agent draws cue mood tags from the union of beat mood_tags and this
+# tone's allowed list above.
+mood_vocabulary:
+  - tense
+  - quiet
+  - ominous
+  - sparse
+  - triumphant
+  - somber
+  - playful
+  - romantic
+  - urgent

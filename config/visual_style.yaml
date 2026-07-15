@@ -1,0 +1,42 @@
+# visual_style.yaml — tone -> image-generation style modifiers for
+# 06_fallback_generation's agent half. Same principle as audio_spec.yaml's
+# tone_music_tags: genre/tone style intent is data here, never an
+# "if genre == ..." branch in code or in the agent prompt (CLAUDE.md section 0
+# hard rule).
+
+tone_style_modifiers:
+  gothic-suspense:
+    - moody
+    - desaturated
+    - high contrast shadows
+    - cinematic
+
+# Fixed negative-prompt boilerplate, applied regardless of tone - these are
+# generic image-generation artifacts to avoid, not style choices.
+negative_prompt_defaults:
+  - text
+  - watermark
+  - logo
+  - blurry
+  - extra limbs
+  - distorted anatomy
+  - low quality
+
+# Prompt length cap (words) - sd-turbo and similar small/fast models respond
+# better to concise prompts than long ones.
+max_prompt_words: 75
+
+# Basic keyword screen applied to every generated image_prompt before
+# rendering (AGENT_PROMPT.md section 8 HITL trigger). Not a substitute for a
+# real content-safety classifier - a coarse guard, case-insensitive substring match.
+unsafe_keyword_screen:
+  - blood
+  - gore
+  - nude
+  - naked
+  - explicit
+  - weapon
+  - gun
+  - knife stabbing
+  - corpse
+
