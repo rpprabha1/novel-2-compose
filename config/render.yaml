@@ -1,0 +1,16 @@
+# render.yaml — final video output parameters for 11_assembly_render.
+#
+# Source clips come from mixed sources (varying resolution/aspect ratio -
+# stock footage in portrait/landscape, generated fallback stills square) and
+# must be normalized to one canvas before concatenation. 1920x1080 chosen as
+# the most broadly compatible standard; clips are scaled to fit and
+# letterboxed/pillarboxed (never cropped or distorted) to preserve every
+# beat's actual framing.
+
+output_width: 1920
+output_height: 1080
+fps: 30
+video_codec: libx264
+video_crf: 20
+audio_codec: aac
+audio_bitrate: 192k

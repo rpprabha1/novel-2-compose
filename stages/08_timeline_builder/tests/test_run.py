@@ -32,10 +32,26 @@ def _assets(specs: list[tuple[str, float]]) -> dict:
     }
 
 
-def _write(input_dir: Path, edit_plan: dict, assets: dict) -> None:
+def _audio_mix(narration_specs: list[tuple[str, float, float]]) -> dict:
+    return {
+        "run_id": "test_run_08",
+        "scene_id": "ch1_sc1",
+        "narration_stems": [
+            {"beat_id": bid, "file_ref": f"cache/{bid}.wav", "start_s": start, "duration_s": dur}
+            for bid, start, dur in narration_specs
+        ],
+        "music_stems": [],
+        "mix_params": {"ducking_depth_db": -12, "ducking_attack_ms": 150},
+        "final_lufs": -16.0,
+    }
+
+
+def _write(input_dir: Path, edit_plan: dict, assets: dict, audio_mix: dict | None = None) -> None:
     input_dir.mkdir(parents=True, exist_ok=True)
     (input_dir / "edit_plan.json").write_text(json.dumps(edit_plan), encoding="utf-8")
     (input_dir / "assets_manifest.json").write_text(json.dumps(assets), encoding="utf-8")
+    if audio_mix is not None:
+        (input_dir / "audio_mix.json").write_text(json.dumps(audio_mix), encoding="utf-8")
 
 
 def test_complete_happy_path_sequential_timeline(tmp_path):
@@ -58,11 +74,32 @@ def test_complete_happy_path_sequential_timeline(tmp_path):
     clips = out["clips"]
     assert clips[0]["timeline_start_s"] == 0.0
     assert clips[0]["timeline_end_s"] == 3.0
-    assert clips[0]["transition_out"] == {"type": "crossfade", "duration_s": 0.0}
+    assert clips[0]["transition_out"] == {"type": "crossfade", "duration_s": 0.75}  # real config value
     assert clips[1]["timeline_start_s"] == 3.0
     assert clips[1]["timeline_end_s"] == 7.0
     assert "transition_out" not in clips[1]  # last clip overall - nothing follows
     assert out["total_duration_s"] == 7.0
+
+
+def test_transition_duration_from_injected_vocab(tmp_path):
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    edit_plan = {
+        "run_id": "test_run_08",
+        "scene_id": "ch1_sc1",
+        "beats": [
+            {"beat_id": "b1", "asset_id": "a1", "shots": [{"shot_id": "b1_s1", "in_s": 0.0, "out_s": 5.0, "hold_duration_s": 3.0}], "transition_out": "dip-to-black", "rationale": ""},
+            {"beat_id": "b2", "asset_id": "a2", "shots": [{"shot_id": "b2_s1", "in_s": 0.0, "out_s": 5.0, "hold_duration_s": 4.0}], "transition_out": "hard-cut", "rationale": ""},
+        ],
+    }
+    assets = _assets([("a1", 10.0), ("a2", 10.0)])
+    _write(input_dir, edit_plan, assets)
+    vocab = {"transition_durations_s": {"hard-cut": 0.0, "crossfade": 0.75, "dip-to-black": 1.23, "match-cut-suggestion": 0.0}}
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG, vocab=vocab)
+
+    assert response.status.value == "COMPLETE"
+    out = json.loads((output_dir / "timeline.json").read_text(encoding="utf-8"))
+    assert out["clips"][0]["transition_out"] == {"type": "dip-to-black", "duration_s": 1.23}
 
 
 def test_multi_shot_beat_intra_beat_hard_cut(tmp_path):
@@ -150,3 +187,91 @@ def test_missing_input_files_fails(tmp_path):
     response = run.main(input_dir, output_dir, RUN_CONFIG)
 
     assert response.status.value == "FAILED"
+
+
+def test_narration_reconciliation_extends_hold_when_asset_covers_it(tmp_path):
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    edit_plan = {
+        "run_id": "test_run_08",
+        "scene_id": "ch1_sc1",
+        "beats": [{"beat_id": "b1", "asset_id": "a1", "shots": [{"shot_id": "b1_s1", "in_s": 0.0, "out_s": 5.0, "hold_duration_s": 3.0}], "transition_out": "hard-cut", "rationale": ""}],
+    }
+    assets = _assets([("a1", 39.0)])  # plenty of room for narration
+    audio_mix = _audio_mix([("b1", 0.0, 14.7)])  # narration needs 14.7s, well beyond the 3.0s visual hold
+    _write(input_dir, edit_plan, assets, audio_mix)
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG)
+
+    assert response.status.value == "COMPLETE"
+    out = json.loads((output_dir / "timeline.json").read_text(encoding="utf-8"))
+    assert out["clips"][0]["timeline_end_s"] == 14.7
+    assert out["clips"][0]["source_out_s"] == 14.7
+    assert out["total_duration_s"] == 14.7
+
+
+def test_narration_reconciliation_leaves_hold_alone_when_already_covers_it(tmp_path):
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    edit_plan = {
+        "run_id": "test_run_08",
+        "scene_id": "ch1_sc1",
+        "beats": [{"beat_id": "b1", "asset_id": "a1", "shots": [{"shot_id": "b1_s1", "in_s": 0.0, "out_s": 5.0, "hold_duration_s": 3.0}], "transition_out": "hard-cut", "rationale": ""}],
+    }
+    assets = _assets([("a1", 39.0)])
+    audio_mix = _audio_mix([("b1", 0.0, 2.0)])  # narration is shorter than the visual hold already
+    _write(input_dir, edit_plan, assets, audio_mix)
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG)
+
+    assert response.status.value == "COMPLETE"
+    out = json.loads((output_dir / "timeline.json").read_text(encoding="utf-8"))
+    assert out["clips"][0]["timeline_end_s"] == 3.0  # untouched - visual hold already sufficient
+
+
+def test_narration_reconciliation_routes_fallback_when_asset_too_short(tmp_path):
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    edit_plan = {
+        "run_id": "test_run_08",
+        "scene_id": "ch1_sc1",
+        "beats": [{"beat_id": "b1", "asset_id": "a1", "shots": [{"shot_id": "b1_s1", "in_s": 0.0, "out_s": 5.0, "hold_duration_s": 3.0}], "transition_out": "hard-cut", "rationale": ""}],
+    }
+    assets = _assets([("a1", 6.0)])  # too short for the narration below
+    audio_mix = _audio_mix([("b1", 0.0, 13.18)])
+    _write(input_dir, edit_plan, assets, audio_mix)
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG)
+
+    assert response.status.value == "FALLBACK_ROUTED"
+    assert response.fallback_routed[0].reason_code == "asset_too_short_for_narration"
+    assert response.fallback_routed[0].item_id == "b1"
+    assert not (output_dir / "timeline.json").exists()
+
+
+def test_narration_reconciliation_scales_multi_shot_beat_proportionally(tmp_path):
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    edit_plan = {
+        "run_id": "test_run_08",
+        "scene_id": "ch1_sc1",
+        "beats": [
+            {
+                "beat_id": "b1",
+                "asset_id": "a1",
+                "shots": [
+                    {"shot_id": "b1_s1", "in_s": 0.0, "out_s": 10.0, "hold_duration_s": 1.0},
+                    {"shot_id": "b1_s2", "in_s": 10.0, "out_s": 20.0, "hold_duration_s": 3.0},
+                ],
+                "transition_out": "hard-cut",
+                "rationale": "",
+            }
+        ],
+    }
+    assets = _assets([("a1", 39.0)])
+    audio_mix = _audio_mix([("b1", 0.0, 8.0)])  # 2x the original 4.0s total -> each shot should double
+
+    _write(input_dir, edit_plan, assets, audio_mix)
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG)
+
+    assert response.status.value == "COMPLETE"
+    out = json.loads((output_dir / "timeline.json").read_text(encoding="utf-8"))
+    assert out["clips"][0]["timeline_end_s"] == 2.0  # 1.0 * 2
+    assert out["clips"][1]["timeline_end_s"] == 8.0  # 2.0 + (3.0 * 2)

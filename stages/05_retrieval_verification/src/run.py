@@ -121,6 +121,7 @@ def main(
     video_cache_dir = REPO_ROOT / "shared" / "runs" / run_id / "cache" / "videos"
 
     assets: list[dict] = []
+    asset_id_to_url: dict[str, str] = {}  # assets_manifest.schema.json has no url field, so this is carried separately for the manifest.json entry (CREDITS.md needs it)
     needs_input_items: list[NeedsInputItem] = []
     fallback_items: list[dict] = []
     verification_failures = 0
@@ -191,12 +192,14 @@ def main(
                     ),
                 )
             assets.append(_asset_entry(run_id, beat_id, match[0], match[1]))
+            asset_id_to_url[match[0]["candidate_id"]] = match[0]["url"]
             continue
 
         top_candidate, top_score = verified[0]
         second_score = verified[1][1] if len(verified) > 1 else -1.0
         if len(verified) == 1 or (top_score - second_score) >= margin:
             assets.append(_asset_entry(run_id, beat_id, top_candidate, top_score))
+            asset_id_to_url[top_candidate["candidate_id"]] = top_candidate["url"]
         else:
             needs_input_items.append(
                 NeedsInputItem(
@@ -236,6 +239,8 @@ def main(
             }
             if asset["attribution"].get("creator"):
                 entry["creator"] = asset["attribution"]["creator"]
+            if asset_id_to_url.get(asset["asset_id"]):
+                entry["source_url"] = asset_id_to_url[asset["asset_id"]]
             manifest_entries.append(entry)
         now = datetime.now(timezone.utc).isoformat()
         for entry in manifest_entries:

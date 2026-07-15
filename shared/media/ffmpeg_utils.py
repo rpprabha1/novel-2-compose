@@ -49,6 +49,21 @@ def extract_frames(video_path: Path, output_dir: Path, n_frames: int = 3) -> lis
     return frame_paths
 
 
+def extract_thumbnail(video_path: Path, timestamp_s: float, dest_path: Path) -> None:
+    """Grabs a single frame at an exact timestamp - unlike extract_frames(),
+    the caller picks the timestamp (e.g. the midpoint of a clip's trimmed
+    [source_in_s, source_out_s] window within a longer source file, not the
+    midpoint of the whole file). Used by 10_human_review_gate's contact sheet."""
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-ss", str(timestamp_s), "-i", str(video_path), "-frames:v", "1", "-q:v", "2", str(dest_path)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not dest_path.exists():
+        raise FFmpegError(f"ffmpeg thumbnail extraction failed at t={timestamp_s:.2f}s for {video_path}: {result.stderr}")
+
+
 def ken_burns_zoompan(
     image_path: Path,
     output_path: Path,

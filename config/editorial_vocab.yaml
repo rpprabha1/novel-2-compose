@@ -9,6 +9,20 @@ transition_families:
   - dip-to-black
   - match-cut-suggestion
 
+# Real transition duration used by 08_timeline_builder (populates
+# timeline.json's transition_out.duration_s) and 11_assembly_render (how
+# long the actual blend/fade runs). hard-cut and match-cut-suggestion are
+# instant (0.0) - a "match cut" is a hard cut with a compositional match,
+# not a timed blend. crossfade overlaps two clips (borrows this much time
+# from each side, shortening total runtime slightly - see
+# 11_assembly_render/README.md); dip-to-black is an in-place fade with no
+# runtime change.
+transition_durations_s:
+  hard-cut: 0.0
+  crossfade: 0.75
+  dip-to-black: 0.5
+  match-cut-suggestion: 0.0
+
 pacing_presets:
   slow-burn:
     hold_duration_s: { min: 2.5, max: 6.0 }
