@@ -82,6 +82,8 @@ def main(
             pixel_art_spec["palettegen_stats_mode"],
             pixel_art_spec["dither_method"],
             pixel_art_spec["bayer_scale"],
+            pixel_art_spec["edge_low"],
+            pixel_art_spec["edge_high"],
             src_width,
             src_height,
             render_cfg["video_codec"],
@@ -123,8 +125,9 @@ def main(
         status=StageStatus.COMPLETE,
         summary=(
             f"Converted final.mp4 to pixel art: grid={grid_w}x{grid_h}, {pixel_art_spec['max_colors']}-color "
-            f"{pixel_art_spec['dither_method']}-dithered palette, duration={out_duration:.3f}s "
-            f"(source {src_duration:.3f}s, drift {drift_pct:.3f}%)."
+            f"{pixel_art_spec['dither_method']}-dithered palette, edge-detected outline overlay "
+            f"(low={pixel_art_spec['edge_low']}, high={pixel_art_spec['edge_high']}), "
+            f"duration={out_duration:.3f}s (source {src_duration:.3f}s, drift {drift_pct:.3f}%)."
         ),
         output_manifest=["outputs/final_pixel_art.mp4"],
     )

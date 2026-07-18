@@ -1,11 +1,19 @@
 # pixel_art_spec.yaml — tunables for 13_pixel_art_conversion.
 #
-# Nearest-neighbor downscale/upscale + a reduced, dithered color palette
-# (retro game look) - CODE, fully deterministic. Chosen 2026-07-18 after the
-# human reviewed 3 real ffmpeg-only samples rendered from the real final.mp4
-# (plain nearest-neighbor block, ffmpeg's pixelize filter, this palette-limited
-# approach) and picked this one for its authentic dithered "retro pixel art"
-# look over the plainer soft-block variants. See ARCHITECTURE.md change log.
+# Area-averaged downscale/upscale + a reduced, dithered color palette (retro
+# game look) + an edge-detected outline overlay - CODE, fully deterministic.
+# Chosen 2026-07-18 after the human reviewed 3 real ffmpeg-only samples
+# rendered from the real final.mp4 (plain nearest-neighbor block, ffmpeg's
+# pixelize filter, this palette-limited approach) and picked this one for its
+# authentic dithered "retro pixel art" look over the plainer soft-block
+# variants. Then, same day, the human reported object outlines were unclear
+# in places; investigation found the downscale itself used nearest-neighbor
+# point-sampling (picking one arbitrary pixel per block instead of averaging
+# the region), which is what made boundaries read as arbitrary in places -
+# switched downscale to area averaging and added an edgedetect-based outline
+# overlay (darkens only the luma channel at detected edges, color preserved).
+# Two more variants (thinner/softer outline, thicker/dilated outline) were
+# also tried and rejected - see ARCHITECTURE.md change log.
 
 # Source resolution is divided by this factor to get the pixel grid size
 # (rounded to the nearest even number, minimum 2x2) - keeps block size
@@ -23,3 +31,12 @@ palettegen_stats_mode: diff
 # color-speckle look; bayer_scale controls dither pattern coarseness.
 dither_method: bayer
 bayer_scale: 3
+
+# Edge-detection thresholds (ffmpeg edgedetect, computed at the same low
+# grid resolution as the palette so the outline aligns to the pixel blocks)
+# for the dark outline overlay. Human rejected two alternatives against
+# these defaults: low=0.2/high=0.5 (softer/higher-threshold, opacity 0.6)
+# was barely distinguishable; low=0.05/high=0.15 plus a dilation pass was
+# far too aggressive and crushed large areas to solid black.
+edge_low: 0.1
+edge_high: 0.35

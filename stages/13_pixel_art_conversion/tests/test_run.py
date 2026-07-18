@@ -17,6 +17,8 @@ PIXEL_ART_SPEC = {
     "palettegen_stats_mode": "diff",
     "dither_method": "bayer",
     "bayer_scale": 3,
+    "edge_low": 0.1,
+    "edge_high": 0.35,
 }
 RENDER_CFG = {"video_codec": "libx264", "video_crf": 28, "audio_codec": "aac", "audio_bitrate": "96k"}
 THRESHOLDS = {"pixel_art": {"duration_tolerance_pct": 2}}
