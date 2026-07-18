@@ -1,10 +1,15 @@
 """Stage 07: editorial_direction.
 
 Given approved beats + winning assets, decides shot subdivision, hold
-durations, and transitions per beat boundary. AGENT stage - judgment is the
-model's, vocabulary/range enforcement and HITL trigger detection are code
-(CLAUDE.md rule 4). Full spec: CLAUDE.md section 4, operationalized in
-AGENT_PROMPT.md.
+durations, and transitions per beat boundary. Originally an AGENT stage
+(CLAUDE.md rule 4) - reclassified to CODE by default 2026-07-18 (see
+ARCHITECTURE.md change log / DECISIONS_LOG.md): the agent proved unreliable
+across multiple models at shot-to-asset assignment specifically, so the
+default path now mechanically turns every retained verified asset into its
+own shot (_build_deterministic_edit_plan). AGENT mode remains available by
+passing an explicit agent_call (e.g. _default_agent_call for the real Ollama
+backend) - vocabulary/range enforcement and HITL trigger detection stay CODE
+either way and run unchanged against both paths' output.
 """
 
 from __future__ import annotations
@@ -78,6 +83,52 @@ def _needs_input(run_id: str, reason_code: str, question: str, options: list[str
     )
 
 
+def _build_deterministic_edit_plan(
+    workable_beat_ids: list[str],
+    beats_by_id: dict,
+    assets_by_beat_id: dict[str, list[dict]],
+    hold_min: float,
+    hold_max: float,
+    max_shots_per_beat: int,
+    min_shot_len: float,
+) -> dict:
+    """CODE (not agent) edit plan: every verified asset a beat retained
+    becomes its own shot, used as-is (in_s=0, whole clip up to its hold) -
+    no LLM judgment over which asset goes to which shot. Human decision
+    2026-07-18 (see DECISIONS_LOG.md): the agent was unreliable at this
+    specific sub-task across multiple models (hallucinated/cross-contaminated
+    asset_id, or just re-using the same asset for every shot despite being
+    told to prefer different ones) - mechanically using every retained asset
+    sidesteps that reliability ceiling entirely, at the cost of no creative
+    transition/rationale judgment (defaults to hard-cut throughout). The
+    existing edit_plan_incomplete/over_subdivided/runtime_drift HITL checks
+    in main() still run unchanged against this output, so the human-in-the-
+    loop safety net is unaffected by skipping the agent."""
+    plan_beats = []
+    for beat_id in workable_beat_ids:
+        beat = beats_by_id[beat_id]
+        usable_assets = [a for a in assets_by_beat_id[beat_id] if a["duration_s"] >= min_shot_len][:max_shots_per_beat]
+        per_shot_target = beat["est_duration_s"] / len(usable_assets)
+        shots = []
+        for i, asset in enumerate(usable_assets):
+            hold = max(hold_min, min(per_shot_target, hold_max))
+            hold = min(hold, asset["duration_s"])
+            shot = {"shot_id": f"{beat_id}_s{i + 1}", "in_s": 0.0, "out_s": round(hold, 4), "hold_duration_s": round(hold, 4)}
+            if i > 0:
+                shot["asset_id"] = asset["asset_id"]
+            shots.append(shot)
+        plan_beats.append(
+            {
+                "beat_id": beat_id,
+                "asset_id": usable_assets[0]["asset_id"],
+                "shots": shots,
+                "transition_out": "hard-cut",
+                "rationale": "",
+            }
+        )
+    return {"beats": plan_beats}
+
+
 def main(
     input_dir: Path,
     output_dir: Path,
@@ -103,9 +154,17 @@ def main(
     beats_data = json.loads(beats_path.read_text(encoding="utf-8"))
     assets_data = json.loads(assets_path.read_text(encoding="utf-8"))
     beats_by_id = {b["beat_id"]: b for b in beats_data.get("beats", [])}
-    asset_by_beat_id = {a["beat_id"]: a for a in assets_data.get("assets", [])}
 
-    agent_call = agent_call or _default_agent_call
+    assets_by_beat_id: dict[str, list[dict]] = {}
+    for a in assets_data.get("assets", []):
+        assets_by_beat_id.setdefault(a["beat_id"], []).append(a)
+    for beat_assets in assets_by_beat_id.values():
+        beat_assets.sort(key=lambda a: a.get("rank", 1))
+    # Primary (rank-1, the winning match) asset per beat - used for the
+    # too-short check, the beat-level edit_plan.asset_id, and as the default
+    # for any shot that doesn't specify its own asset_id.
+    asset_by_beat_id = {beat_id: beat_assets[0] for beat_id, beat_assets in assets_by_beat_id.items()}
+
     thresholds = thresholds or yaml.safe_load((REPO_ROOT / "config" / "thresholds.yaml").read_text(encoding="utf-8"))
     vocab = vocab or yaml.safe_load((REPO_ROOT / "config" / "editorial_vocab.yaml").read_text(encoding="utf-8"))
     min_shot_len = thresholds["editorial"]["min_viable_shot_length_s"]
@@ -145,45 +204,64 @@ def main(
             error=ErrorInfo(message="No beats have a matching winning asset to edit."),
         )
 
-    beats_payload = [
-        {
-            "beat_id": beat_id,
-            "visual_description": beats_by_id[beat_id]["visual_description"],
-            "est_duration_s": beats_by_id[beat_id]["est_duration_s"],
-            "asset_id": asset_by_beat_id[beat_id]["asset_id"],
-            "asset_duration_s": asset_by_beat_id[beat_id]["duration_s"],
-        }
-        for beat_id in workable_beat_ids
-    ]
-    system_prompt = _render_system_prompt(PROMPT_PATH.read_text(encoding="utf-8"))
-    user_message = (
-        f"pacing: {pacing}\n"
-        f"hold_duration_s_range: min={hold_min}, max={hold_max}\n"
-        f"max_shots_per_beat: {max_shots_per_beat}\n"
-        f"transition_families: {sorted(transition_families)}\n"
-        f"min_viable_shot_length_s: {min_shot_len}\n\n"
-        f"Beats (in order):\n{json.dumps(beats_payload, indent=2)}"
-    )
-
-    try:
-        raw_response = agent_call(system_prompt, user_message)
-    except AgentBackendError as exc:
-        return StageResponse(
-            envelope_id="",
-            run_id=run_id,
-            stage=STAGE_NAME,
-            status=StageStatus.FAILED,
-            error=ErrorInfo(message="Agent backend call failed", diagnostics=str(exc)),
+    if agent_call is not None:
+        # AGENT mode: explicit opt-in. CLAUDE.md classifies this stage AGENT
+        # by default, but a 2026-07-18 human decision (see DECISIONS_LOG.md)
+        # made deterministic generation (below) the default after the agent
+        # proved unreliable across multiple models specifically at
+        # shot-to-asset assignment (hallucinated/cross-contaminated
+        # asset_id, or collapsing every shot onto the same asset despite
+        # available_assets listing several). Pass agent_call=_default_agent_call
+        # explicitly to use the real Ollama backend again.
+        beats_payload = [
+            {
+                "beat_id": beat_id,
+                "visual_description": beats_by_id[beat_id]["visual_description"],
+                "est_duration_s": beats_by_id[beat_id]["est_duration_s"],
+                "asset_id": asset_by_beat_id[beat_id]["asset_id"],
+                "asset_duration_s": asset_by_beat_id[beat_id]["duration_s"],
+                "available_assets": [
+                    {"asset_id": a["asset_id"], "duration_s": a["duration_s"], "rank": a.get("rank", 1)}
+                    for a in assets_by_beat_id[beat_id]
+                ],
+            }
+            for beat_id in workable_beat_ids
+        ]
+        system_prompt = _render_system_prompt(PROMPT_PATH.read_text(encoding="utf-8"))
+        user_message = (
+            f"pacing: {pacing}\n"
+            f"hold_duration_s_range: min={hold_min}, max={hold_max}\n"
+            f"max_shots_per_beat: {max_shots_per_beat}\n"
+            f"transition_families: {sorted(transition_families)}\n"
+            f"min_viable_shot_length_s: {min_shot_len}\n\n"
+            f"Beats (in order):\n{json.dumps(beats_payload, indent=2)}"
         )
 
-    try:
-        parsed = json.loads(_strip_wrapper(raw_response))
-    except json.JSONDecodeError as exc:
-        return _needs_input(
-            run_id,
-            "edit_plan_incomplete",
-            f"The editorial-direction model produced invalid JSON: {exc}. Retry?",
-            ["Retry generation", "Review beats manually"],
+        try:
+            raw_response = agent_call(system_prompt, user_message)
+        except AgentBackendError as exc:
+            return StageResponse(
+                envelope_id="",
+                run_id=run_id,
+                stage=STAGE_NAME,
+                status=StageStatus.FAILED,
+                error=ErrorInfo(message="Agent backend call failed", diagnostics=str(exc)),
+            )
+
+        try:
+            parsed = json.loads(_strip_wrapper(raw_response))
+        except json.JSONDecodeError as exc:
+            return _needs_input(
+                run_id,
+                "edit_plan_incomplete",
+                f"The editorial-direction model produced invalid JSON: {exc}. Retry?",
+                ["Retry generation", "Review beats manually"],
+            )
+    else:
+        # CODE mode (default, 2026-07-18): every retained verified asset for
+        # a beat becomes its own shot, used as-is.
+        parsed = _build_deterministic_edit_plan(
+            workable_beat_ids, beats_by_id, assets_by_beat_id, hold_min, hold_max, max_shots_per_beat, min_shot_len,
         )
 
     parsed["run_id"] = run_id
@@ -213,7 +291,14 @@ def main(
             continue
         if len(shots) > max_shots_per_beat:
             validation_errors.append(f"{beat_id}: {len(shots)} shots exceeds max_shots_per_beat={max_shots_per_beat}")
+        known_asset_ids = {a["asset_id"] for a in assets_by_beat_id[beat_id]}
         for shot in shots:
+            shot_asset_id = shot.get("asset_id")
+            if shot_asset_id is not None and shot_asset_id not in known_asset_ids:
+                validation_errors.append(
+                    f"{beat_id}: shot {shot.get('shot_id')!r} references asset_id {shot_asset_id!r} "
+                    f"not in this beat's available_assets {sorted(known_asset_ids)}"
+                )
             hd = shot.get("hold_duration_s")
             if hd is None:
                 validation_errors.append(f"{beat_id}: missing hold_duration_s")
@@ -266,7 +351,15 @@ def main(
 
     hitl_items: list[NeedsInputItem] = []
 
-    over_subdivided = [bid for bid in workable_beat_ids if len(plan_by_id[bid]["shots"]) > hitl_shot_threshold]
+    def _max_shots_from_one_asset(bid: str) -> int:
+        entry = plan_by_id[bid]
+        counts: dict[str, int] = {}
+        for shot in entry["shots"]:
+            resolved = shot.get("asset_id") or entry["asset_id"]
+            counts[resolved] = counts.get(resolved, 0) + 1
+        return max(counts.values(), default=0)
+
+    over_subdivided = [bid for bid in workable_beat_ids if _max_shots_from_one_asset(bid) > hitl_shot_threshold]
     if over_subdivided:
         hitl_items.append(
             NeedsInputItem(

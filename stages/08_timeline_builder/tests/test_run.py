@@ -150,6 +150,61 @@ def test_source_out_s_trims_to_hold_duration_not_out_s(tmp_path):
     assert out["clips"][0]["source_out_s"] == 2.75  # not 4.5
 
 
+def test_multi_shot_beat_resolves_per_shot_asset(tmp_path):
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    edit_plan = {
+        "run_id": "test_run_08",
+        "scene_id": "ch1_sc1",
+        "beats": [
+            {
+                "beat_id": "b1",
+                "asset_id": "a1",
+                "shots": [
+                    {"shot_id": "b1_s1", "in_s": 0.0, "out_s": 4.0, "hold_duration_s": 4.0},
+                    {"shot_id": "b1_s2", "asset_id": "a2", "in_s": 0.0, "out_s": 4.0, "hold_duration_s": 4.0},
+                ],
+                "transition_out": "hard-cut",
+                "rationale": "",
+            }
+        ],
+    }
+    assets = _assets([("a1", 20.0), ("a2", 20.0)])
+    _write(input_dir, edit_plan, assets)
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG)
+
+    assert response.status.value == "COMPLETE"
+    out = json.loads((output_dir / "timeline.json").read_text(encoding="utf-8"))
+    clips = out["clips"]
+    assert clips[0]["file_ref"] == "cache/a1.mp4"
+    assert clips[1]["file_ref"] == "cache/a2.mp4"
+    assert clips[0]["transition_out"] == {"type": "hard-cut", "duration_s": 0.0}  # intra-beat
+    assert out["total_duration_s"] == 8.0
+
+
+def test_shot_asset_id_not_in_manifest_fails(tmp_path):
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    edit_plan = {
+        "run_id": "test_run_08",
+        "scene_id": "ch1_sc1",
+        "beats": [
+            {
+                "beat_id": "b1",
+                "asset_id": "a1",
+                "shots": [{"shot_id": "b1_s1", "asset_id": "missing_asset", "in_s": 0.0, "out_s": 4.0, "hold_duration_s": 4.0}],
+                "transition_out": "hard-cut",
+                "rationale": "",
+            }
+        ],
+    }
+    assets = _assets([("a1", 20.0)])
+    _write(input_dir, edit_plan, assets)
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG)
+
+    assert response.status.value == "FAILED"
+
+
 def test_missing_asset_fails(tmp_path):
     input_dir, output_dir = tmp_path / "in", tmp_path / "out"
     edit_plan = {

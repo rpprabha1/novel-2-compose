@@ -278,6 +278,37 @@ def test_invalid_mood_tag_needs_input(tmp_path):
     assert response.needs_input[0].reason_code == "cues_incomplete"
 
 
+def test_cue_mood_tag_from_beats_own_tag_is_allowed(tmp_path):
+    # Regression test for a real bug: allowed_mood_tags was only
+    # tone_music_tags[tone], ignoring the beats' own mood_tags entirely -
+    # audio_spec.yaml's own comment documents the union as the intended
+    # design. A beat legitimately tagged outside the tone's list (e.g.
+    # "romantic" in a gothic-suspense scene) made every cue covering it
+    # schema-unsatisfiable regardless of model quality, since the agent is
+    # shown that beat's real mood_tags but validated against a narrower set.
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    beats = _beats([("b1", "para:1")])
+    beats["beats"][0]["mood_tags"] = ["romantic"]  # not in AUDIO_SPEC's gothic-suspense tone list
+    _write(input_dir, beats)
+    cue = json.dumps(
+        {"cues": [{"cue_id": "cue001", "start_beat_id": "b1", "end_beat_id": "b1", "mood_tags": ["romantic"], "target_intensity": 0.3, "rationale": "r"}]}
+    )
+    candidates = [MusicCandidate(track_ref="t1", source="fake", url="https://example.com/1", license="Fake License", download_url="https://example.com/1.mp3")]
+
+    response = run.main(
+        input_dir, output_dir, RUN_CONFIG,
+        agent_call=lambda s, u: cue,
+        music_source=FakeMusicSource(candidates),
+        tts_fn=_fake_tts,
+        downloader=_fake_downloader,
+        audio_spec=AUDIO_SPEC,
+        hitl_decisions={"cue001": "t1"},
+    )
+
+    assert response.status.value != "FAILED"
+    assert not any(item.reason_code == "cues_incomplete" for item in (response.needs_input or []))
+
+
 def test_tts_failure_fails(tmp_path):
     input_dir, output_dir = tmp_path / "in", tmp_path / "out"
     _write(input_dir, _beats([("b1", "para:1")]))

@@ -6,6 +6,8 @@
 
 Materializes the approved `edit_plan.json` + `assets_manifest.json` into `timeline.json`: absolute timecodes, file references, transition parameters. Pure transformation + validation — zero creative decisions (those were already made and approved in 07).
 
+**Per-shot asset resolution (2026-07-17, see `ARCHITECTURE.md`).** Each shot's `file_ref`/`duration_s` is now resolved from its own `asset_id` if set (falling back to the beat's `asset_id` otherwise), not once per beat — this is what lets a multi-angle beat (`07_editorial_direction`'s shots cutting to different verified assets) actually render each shot from its own distinct clip. Narration-reconciliation's asset-length check (below) is per-shot for the same reason.
+
 ## I/O
 
 - Input: `inputs/edit_plan.json` (approved), `inputs/assets_manifest.json`, optionally `inputs/audio_mix.json` (from Stage 09 — see narration reconciliation below; absent is fine, behaves exactly as before).

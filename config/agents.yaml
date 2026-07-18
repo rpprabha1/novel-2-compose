@@ -10,7 +10,7 @@ backend: ollama
 
 ollama:
   host: http://localhost:11434
-  default_model: llama3.2:3b
+  default_model: llama3.2:1b
   timeout_s: 480
   # Ollama's structured-output mode: forces the model to emit valid JSON
   # matching this pipeline's schemas rather than free text.
@@ -21,7 +21,7 @@ ollama:
 
 # Per-stage override. Falls back to ollama.default_model if a stage isn't listed.
 stage_models:
-  02_beat_extraction: llama3.2:3b
-  06_fallback_generation: llama3.2:3b
-  07_editorial_direction: llama3.2:3b
-  09_audio_production: llama3.2:3b
+  02_beat_extraction: llama3.2:1b
+  06_fallback_generation: llama3.2:3b  # bumped from 1b (2026-07-17): 1b failed this stage's structured prompt+rationale generation twice for real - see DECISIONS_LOG.md
+  07_editorial_direction: llama3.2:3b  # bumped from 1b (2026-07-18): 1b failed this stage's multi-beat/multi-asset structured plan twice for real (hallucinated/cross-contaminated asset_id, repeated out-of-range hold_duration_s) - see DECISIONS_LOG.md
+  09_audio_production: llama3.2:3b  # bumped from 1b (2026-07-18): 1b failed this stage's cue-sheet generation twice for real (overlapping cue boundaries, invalid mood tag) - see DECISIONS_LOG.md

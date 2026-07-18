@@ -20,7 +20,17 @@ def _load_pipeline(model_name: str, device: str):
         import torch
         from diffusers import AutoPipelineForText2Image
 
-        _pipe = AutoPipelineForText2Image.from_pretrained(model_name, torch_dtype=torch.float32)
+        # variant="fp16" selects the smaller on-disk checkpoint files (~2.6GB
+        # vs. ~5GB for sd-turbo's fp32 files). torch_dtype=torch.float16
+        # (changed from float32 2026-07-18) keeps compute in fp16 too, not
+        # just storage - upcasting each fp16 tensor to float32 on load means
+        # peak memory briefly approaches the *full-precision* ~5GB footprint
+        # even when reading the smaller files, which is what actually
+        # exhausted RAM/pagefile on a constrained dev machine for real
+        # (segfault/OOM partway through loading, confirmed independent of
+        # available disk space). Staying in float16 throughout keeps the
+        # real memory footprint near the ~2.6GB file size instead.
+        _pipe = AutoPipelineForText2Image.from_pretrained(model_name, variant="fp16", torch_dtype=torch.float16)
         _pipe.to(device)
         _loaded_model_key = key
     return _pipe

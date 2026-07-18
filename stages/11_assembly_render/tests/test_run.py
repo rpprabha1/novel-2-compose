@@ -129,6 +129,43 @@ def test_empty_clips_fails(tmp_path):
     assert response.status.value == "FAILED"
 
 
+def test_reused_shot_id_with_changed_source_is_not_stale_cached(tmp_path):
+    # Regression test for a real bug (2026-07-18): normalize_clip's cache
+    # was keyed by shot_id alone (norm_<shot_id>.mp4). Re-running the stage
+    # for the same run_id after the upstream edit_plan/timeline changed
+    # (same shot_id, different file_ref/source_in_s/source_out_s - e.g. a
+    # beat gained more shots and shot indices got reassigned to different
+    # assets) silently reused the stale cached clip instead of regenerating
+    # it, producing a final.mp4 built from a mix of correct and leftover-
+    # wrong content with no error. Fixed by folding file_ref/source_in_s/
+    # source_out_s into the cache key.
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    clip_a = tmp_path / "assets" / "a.mp4"
+    clip_b = tmp_path / "assets" / "b.mp4"
+    _make_color_clip(clip_a, "red", "320x240", 2.0)
+    _make_color_clip(clip_b, "blue", "320x240", 4.0)
+    audio_path = input_dir / "scene_mix.wav"
+
+    # First run: shot_id "s1" -> the 2s red clip.
+    clips_first = [{"shot_id": "s1", "file_ref": str(clip_a), "source_in_s": 0.0, "source_out_s": 2.0, "timeline_start_s": 0.0, "timeline_end_s": 2.0}]
+    _write_timeline(input_dir, clips_first)
+    _make_audio(audio_path, 2.0)
+    response_first = run.main(input_dir, output_dir, RUN_CONFIG, render_cfg=RENDER_CFG, thresholds=THRESHOLDS)
+    assert response_first.status.value == "COMPLETE"
+
+    # Second run, same run_id and shot_id "s1", but now the 4s blue clip -
+    # simulating an edit_plan regeneration that reassigned this shot_id to
+    # different source content.
+    clips_second = [{"shot_id": "s1", "file_ref": str(clip_b), "source_in_s": 0.0, "source_out_s": 4.0, "timeline_start_s": 0.0, "timeline_end_s": 4.0}]
+    _write_timeline(input_dir, clips_second)
+    _make_audio(audio_path, 4.0)
+    response_second = run.main(input_dir, output_dir, RUN_CONFIG, render_cfg=RENDER_CFG, thresholds=THRESHOLDS)
+
+    assert response_second.status.value == "COMPLETE"
+    duration = run.probe_duration_s(output_dir / "final.mp4")
+    assert abs(duration - 4.0) < 0.1  # reflects the new 4s blue clip, not the stale 2s red one
+
+
 def test_missing_clip_file_fails(tmp_path):
     input_dir, output_dir = tmp_path / "in", tmp_path / "out"
     clips = [

@@ -1,5 +1,13 @@
+# Core dependencies - needed by every CODE stage regardless of machine.
+# ML/agent-stage dependencies (torch, transformers, diffusers, piper-tts)
+# live in requirements-ml.txt since they're large and only needed by
+# stages 04/06/09 - see scripts/setup.py, which installs both by default
+# but supports --core-only to skip the ML tier.
 jsonschema>=4.20
 PyYAML>=6.0
+requests>=2.31
+numpy>=1.24
+Pillow>=10.0
 
 # dev/test
 pytest>=8.0

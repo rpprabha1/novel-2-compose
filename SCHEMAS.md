@@ -127,7 +127,7 @@ Schema: `shared/schemas/candidates.schema.json`. Output of `03_candidate_fetch`;
 ```
 
 ## Assets Manifest
-Schema: `shared/schemas/assets_manifest.schema.json`. Winning asset per beat, from `05_retrieval_verification` or `06_fallback_generation`.
+Schema: `shared/schemas/assets_manifest.schema.json`. Verified asset(s) per beat, from `05_retrieval_verification` or `06_fallback_generation`. A `beat_id` may appear more than once — one entry per `rank` (1 = the winning/primary asset; 2..N are additional verified candidates for the same beat, retained per `config/thresholds.yaml`'s `retrieval_verification.assets_per_beat` so `07_editorial_direction` can cut between distinct real clips instead of only ever having one asset available). `rank` is optional; its absence means rank 1 (pre-2026-07-17 producers of this file, e.g. `06_fallback_generation`, are unaffected).
 
 ```json
 {
@@ -141,8 +141,20 @@ Schema: `shared/schemas/assets_manifest.schema.json`. Winning asset per beat, fr
       "file_ref": "shared/runs/run_2026_07_ch1/assets/pexels_3021.mp4",
       "duration_s": 12.0,
       "confidence": 0.81,
+      "rank": 1,
       "license": "Pexels License",
       "attribution": { "source": "pexels", "creator_required": false }
+    },
+    {
+      "beat_id": "b001",
+      "asset_id": "pixabay_88213",
+      "origin": "retrieved_verified",
+      "file_ref": "shared/runs/run_2026_07_ch1/assets/pixabay_88213.mp4",
+      "duration_s": 9.0,
+      "confidence": 0.74,
+      "rank": 2,
+      "license": "Pixabay License",
+      "attribution": { "source": "pixabay", "creator_required": false }
     }
   ]
 }
@@ -167,19 +179,20 @@ Schema: `shared/schemas/fallback_prompt.schema.json`. Agent half of `06_fallback
 ```
 
 ## Edit Plan
-Schema: `shared/schemas/edit_plan.schema.json`. Output of `07_editorial_direction` (full field description in CLAUDE.md §4).
+Schema: `shared/schemas/edit_plan.schema.json`. Output of `07_editorial_direction` (full field description in CLAUDE.md §4). Each beat's `asset_id` is its primary (rank-1) asset. Each shot may set its own `asset_id` to cut to a different one of the beat's available assets (a different verified camera angle) instead of resubdividing the primary asset — this is optional and, when omitted, the shot uses the beat's primary asset.
 
 ```json
 {
   "run_id": "run_2026_07_ch1",
   "scene_id": "ch1_sc1",
-  "total_runtime_s": 3.5,
+  "total_runtime_s": 7.0,
   "beats": [
     {
       "beat_id": "b001",
       "asset_id": "pexels_3021",
       "shots": [
-        { "shot_id": "b001_s1", "in_s": 0.0, "out_s": 3.5, "hold_duration_s": 3.5 }
+        { "shot_id": "b001_s1", "in_s": 0.0, "out_s": 3.5, "hold_duration_s": 3.5 },
+        { "shot_id": "b001_s2", "asset_id": "pixabay_88213", "in_s": 0.0, "out_s": 3.5, "hold_duration_s": 3.5 }
       ],
       "transition_out": "hard-cut",
       "rationale": "Default cut; no dramatic emphasis needed for establishing beat"

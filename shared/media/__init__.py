@@ -14,12 +14,13 @@ from .audio_mix import (
     overlay_narration,
     trim_audio,
 )
-from .ffmpeg_utils import FFmpegError, extract_frames, extract_thumbnail, ken_burns_zoompan, probe_duration_s
+from .ffmpeg_utils import FFmpegError, extract_frames, extract_thumbnail, generate_text_card, ken_burns_zoompan, probe_duration_s
 
 __all__ = [
     "FFmpegError",
     "extract_frames",
     "extract_thumbnail",
+    "generate_text_card",
     "ken_burns_zoompan",
     "probe_duration_s",
     "crossfade_concat",

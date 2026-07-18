@@ -104,14 +104,20 @@ def main(input_dir: Path, output_dir: Path, run_config: dict, vocab: dict | None
             required = beat.pop("_narration_required_s", None)
             if required is None:
                 continue
-            asset = asset_by_id.get(beat["asset_id"])
-            available = asset["duration_s"] if asset else 0.0
-            if required > available + 1e-9:
+            deficient_shots = []
+            for shot in beat["shots"]:
+                resolved_asset_id = shot.get("asset_id") or beat["asset_id"]
+                asset = asset_by_id.get(resolved_asset_id)
+                available = asset["duration_s"] if asset else 0.0
+                needed = shot["in_s"] + shot["hold_duration_s"]
+                if needed > available + 1e-9:
+                    deficient_shots.append(shot["shot_id"])
+            if deficient_shots:
                 fallback_items.append(
                     FallbackRoutedItem(
                         item_id=beat["beat_id"],
                         reason_code="asset_too_short_for_narration",
-                        detail=f"Needs {required:.2f}s to cover narration but asset {beat['asset_id']!r} is only {available:.2f}s long.",
+                        detail=f"Needs {required:.2f}s to cover narration but shot(s) {deficient_shots} don't have enough source footage.",
                     )
                 )
 
@@ -128,21 +134,22 @@ def main(input_dir: Path, output_dir: Path, run_config: dict, vocab: dict | None
     clips = []
     cursor_s = 0.0
     for beat_index, beat in enumerate(beats):
-        asset = asset_by_id.get(beat["asset_id"])
-        if asset is None:
-            return StageResponse(
-                envelope_id="",
-                run_id=run_id,
-                stage=STAGE_NAME,
-                status=StageStatus.FAILED,
-                error=ErrorInfo(
-                    message=f"edit_plan.json beat {beat['beat_id']!r} references asset_id "
-                    f"{beat['asset_id']!r} not present in assets_manifest.json"
-                ),
-            )
-
         shots = beat["shots"]
         for shot_index, shot in enumerate(shots):
+            resolved_asset_id = shot.get("asset_id") or beat["asset_id"]
+            asset = asset_by_id.get(resolved_asset_id)
+            if asset is None:
+                return StageResponse(
+                    envelope_id="",
+                    run_id=run_id,
+                    stage=STAGE_NAME,
+                    status=StageStatus.FAILED,
+                    error=ErrorInfo(
+                        message=f"edit_plan.json beat {beat['beat_id']!r} shot {shot['shot_id']!r} references "
+                        f"asset_id {resolved_asset_id!r} not present in assets_manifest.json"
+                    ),
+                )
+
             in_s = shot["in_s"]
             hold_s = shot["hold_duration_s"]
             source_out_s = in_s + hold_s

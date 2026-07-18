@@ -21,6 +21,7 @@
           "file_ref": { "type": "string" },
           "duration_s": { "type": "number", "exclusiveMinimum": 0 },
           "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "rank": { "type": "integer", "minimum": 1, "description": "1 = the winning/primary asset for this beat. >1 = an additional verified candidate retained so 07_editorial_direction can cut between distinct clips for the same beat. A beat_id may now appear more than once in this array, one entry per rank." },
           "license": { "type": "string" },
           "attribution": {
             "type": "object",

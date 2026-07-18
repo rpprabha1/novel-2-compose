@@ -260,3 +260,75 @@ def test_missing_input_files_fails(tmp_path):
     response = run.main(input_dir, output_dir, {"run_id": "test_run_05_missing"}, thresholds=THRESHOLDS)
 
     assert response.status.value == "FAILED"
+
+
+def test_assets_per_beat_retains_ranked_alternates(tmp_path):
+    run_id = "test_run_05_multiangle"
+    _clean_run_dir(run_id)
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    candidates = [_candidate("c1", 0.9), _candidate("c2", 0.8), _candidate("c3", 0.7)]
+    beats, candidates_data = _make_inputs(run_id, candidates)
+    _write(input_dir, beats, candidates_data)
+    embedder = FakeEmbedder({"c1": 0.9, "c2": 0.5, "c3": 0.4})
+    thresholds = {**THRESHOLDS, "retrieval_verification": {**THRESHOLDS["retrieval_verification"], "assets_per_beat": 2}}
+
+    response = run.main(
+        input_dir, output_dir, {"run_id": run_id},
+        downloader=_fake_downloader(), frame_extractor=_fake_frame_extractor(), embedder=embedder, thresholds=thresholds,
+    )
+
+    assert response.status.value == "COMPLETE"
+    assets = json.loads((output_dir / "assets_manifest.json").read_text(encoding="utf-8"))["assets"]
+    assert [a["asset_id"] for a in assets] == ["c1", "c2"]
+    assert [a["rank"] for a in assets] == [1, 2]
+    assert all(a["beat_id"] == "b1" for a in assets)
+
+    _clean_run_dir(run_id)
+
+
+def test_assets_per_beat_default_keeps_only_winner(tmp_path):
+    # THRESHOLDS has no assets_per_beat key - .get(..., 1) default must
+    # preserve the pre-multi-angle behavior exactly (regression guard).
+    run_id = "test_run_05_default_single"
+    _clean_run_dir(run_id)
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    candidates = [_candidate("c1", 0.9), _candidate("c2", 0.8)]
+    beats, candidates_data = _make_inputs(run_id, candidates)
+    _write(input_dir, beats, candidates_data)
+    embedder = FakeEmbedder({"c1": 0.9, "c2": 0.3})
+
+    response = run.main(
+        input_dir, output_dir, {"run_id": run_id},
+        downloader=_fake_downloader(), frame_extractor=_fake_frame_extractor(), embedder=embedder, thresholds=THRESHOLDS,
+    )
+
+    assert response.status.value == "COMPLETE"
+    assets = json.loads((output_dir / "assets_manifest.json").read_text(encoding="utf-8"))["assets"]
+    assert len(assets) == 1
+    assert assets[0]["rank"] == 1
+
+    _clean_run_dir(run_id)
+
+
+def test_assets_per_beat_with_hitl_decision_ranks_chosen_first(tmp_path):
+    run_id = "test_run_05_multiangle_hitl"
+    _clean_run_dir(run_id)
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    candidates = [_candidate("c1", 0.9), _candidate("c2", 0.8)]
+    beats, candidates_data = _make_inputs(run_id, candidates)
+    _write(input_dir, beats, candidates_data)
+    embedder = FakeEmbedder({"c1": 0.52, "c2": 0.50})
+    thresholds = {**THRESHOLDS, "retrieval_verification": {**THRESHOLDS["retrieval_verification"], "assets_per_beat": 2}}
+
+    response = run.main(
+        input_dir, output_dir, {"run_id": run_id},
+        downloader=_fake_downloader(), frame_extractor=_fake_frame_extractor(), embedder=embedder, thresholds=thresholds,
+        hitl_decisions={"b1": "c2"},
+    )
+
+    assert response.status.value == "COMPLETE"
+    assets = json.loads((output_dir / "assets_manifest.json").read_text(encoding="utf-8"))["assets"]
+    assert [a["asset_id"] for a in assets] == ["c2", "c1"]
+    assert [a["rank"] for a in assets] == [1, 2]
+
+    _clean_run_dir(run_id)

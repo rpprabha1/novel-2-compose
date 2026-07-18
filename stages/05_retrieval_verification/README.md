@@ -6,10 +6,12 @@
 
 Downloads the top-k candidates per beat (`config/thresholds.yaml`'s `retrieval_verification.top_k`), samples frames across the actual clip (not just the thumbnail), and re-scores. Beats whose top candidates are within the close-score margin are batched for a human tie-break via the Coordinator (`CLAUDE.md` rule 10) rather than auto-selected.
 
+**Multi-angle retention (2026-07-17, see `ARCHITECTURE.md`).** Retains up to `config/thresholds.yaml`'s `retrieval_verification.assets_per_beat` verified candidates per beat (ranked, `rank: 1` = the winning/primary asset) instead of only the winner — no extra downloading, these were already fetched and frame-verified for the tie-break comparison. This lets `07_editorial_direction` cut a beat between several distinct real clips ("different camera angles") instead of only ever having one asset available. Defaults to 1 (the pre-existing single-winner behavior) if `assets_per_beat` is absent from thresholds.
+
 ## I/O
 
 - Input: `inputs/beats.json` (for `visual_description` text) + `inputs/candidates.json` (Stage 04's output — only beats with `routing.route == "05_retrieval_verification"` are this stage's concern; others are skipped).
-- Output: `outputs/assets_manifest.json` entries with `origin: retrieved_verified` for winning beats, only written when every beat is resolved. A `FALLBACK_ROUTED` response (reason: `verification_failed`) covers beats where every top-k candidate failed to download/verify. A `NEEDS_INPUT` response (reason: `close_score_tiebreak`) batches every beat still ambiguous after verification into one response, per `CLAUDE.md` rule 10 — no auto-select on a close call.
+- Output: `outputs/assets_manifest.json` — up to `assets_per_beat` entries per beat (each with `origin: retrieved_verified` and a `rank`), only written when every beat is resolved. A `FALLBACK_ROUTED` response (reason: `verification_failed`) covers beats where every top-k candidate failed to download/verify. A `NEEDS_INPUT` response (reason: `close_score_tiebreak`) batches every beat still ambiguous after verification into one response, per `CLAUDE.md` rule 10 — no auto-select on a close call.
 
 ## Run / test instructions
 
@@ -38,3 +40,4 @@ python stages/05_retrieval_verification/src/run.py \
 - [x] HITL batching presents all close-score beats for one scene together, not one at a time (all 5 came back in a single `NEEDS_INPUT` response).
 - [x] Human tie-break decisions recorded in `DECISIONS_LOG.md` and correctly resolved on re-run.
 - [ ] Human review of real `outputs/assets_manifest.json` — pending.
+- [x] Multi-angle retention: `rank` populated correctly (chosen/primary always `rank: 1`), capped at `assets_per_beat`, and the pre-2026-07-17 single-asset behavior is preserved exactly when `assets_per_beat` is unset (unit-tested).

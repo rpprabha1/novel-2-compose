@@ -185,6 +185,90 @@ def test_render_failure_fails(tmp_path):
     assert response.status.value == "FAILED"
 
 
+def _noop_text_card_renderer(text: str, duration_s: float, dest_path: Path) -> None:
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    dest_path.write_bytes(b"fake mp4")
+
+
+def test_default_code_mode_generates_text_card_assets(tmp_path):
+    # 2026-07-18: main() defaults to the lightweight ffmpeg text-card path
+    # (CODE) when agent_call is omitted, not the real Ollama+sd-turbo
+    # backend - sd-turbo proved too memory-heavy for a constrained dev
+    # machine, and once diffusion is skipped an LLM-authored prompt has
+    # nothing to render anyway. See DECISIONS_LOG.md / ARCHITECTURE.md.
+    run_id = "test_run_06"
+    _clean_run_dir(run_id)
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    beats, candidates = _make_inputs({"b1": "06_fallback_generation"})
+    _write(input_dir, beats, candidates)
+    calls = []
+
+    def recording_text_card_renderer(text, duration_s, dest_path):
+        calls.append((text, duration_s))
+        _noop_text_card_renderer(text, duration_s, dest_path)
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG, text_card_renderer=recording_text_card_renderer)
+
+    assert response.status.value == "COMPLETE"
+    out = json.loads((output_dir / "assets_manifest.json").read_text(encoding="utf-8"))
+    assert out["assets"][0]["beat_id"] == "b1"
+    assert out["assets"][0]["origin"] == "generated_fallback"
+    assert "text card" in out["assets"][0]["license"]
+    assert not (output_dir / "fallback_prompt.json").exists()  # no agent output in CODE mode
+    # rendered from the beat's own visual_description, not an LLM prompt.
+    # Duration is padded to config/text_card.yaml's min_duration_s (20.0),
+    # not the beat's raw est_duration_s (4.0) - a text card has no natural
+    # length ceiling like real footage, and est_duration_s badly
+    # underestimates real TTS narration length (see ARCHITECTURE.md).
+    assert calls == [("a woman kneeling beside an open trunk", 20.0)]
+    assert out["assets"][0]["duration_s"] == 20.0
+
+    _clean_run_dir(run_id)
+
+
+def test_explicit_agent_call_still_routes_to_agent_diffusion_mode(tmp_path):
+    # Agent+diffusion mode remains available by explicitly passing
+    # agent_call - not deleted, just no longer the default.
+    run_id = "test_run_06"
+    _clean_run_dir(run_id)
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    beats, candidates = _make_inputs({"b1": "06_fallback_generation"})
+    _write(input_dir, beats, candidates)
+    calls = []
+
+    def fake_agent_call(system_prompt, user_message):
+        calls.append(1)
+        return VALID_PROMPTS_JSON
+
+    response = run.main(
+        input_dir, output_dir, RUN_CONFIG,
+        agent_call=fake_agent_call,
+        image_generator=_noop_image_generator,
+        zoompan=_noop_zoompan,
+    )
+
+    assert response.status.value == "COMPLETE"
+    assert len(calls) == 1
+    out = json.loads((output_dir / "assets_manifest.json").read_text(encoding="utf-8"))
+    assert "sd-turbo" in out["assets"][0]["license"]
+    assert (output_dir / "fallback_prompt.json").exists()
+
+    _clean_run_dir(run_id)
+
+
+def test_code_mode_render_failure_fails(tmp_path):
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    beats, candidates = _make_inputs({"b1": "06_fallback_generation"})
+    _write(input_dir, beats, candidates)
+
+    def _failing_text_card_renderer(text, duration_s, dest_path):
+        raise FFmpegError("simulated text card failure")
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG, text_card_renderer=_failing_text_card_renderer)
+
+    assert response.status.value == "FAILED"
+
+
 def test_missing_input_files_fails(tmp_path):
     input_dir, output_dir = tmp_path / "in", tmp_path / "out"
     input_dir.mkdir()

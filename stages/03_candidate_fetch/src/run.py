@@ -106,6 +106,7 @@ def main(
     run_config: dict,
     sources: dict[str, FootageSource] | None = None,
     max_results: int | None = None,
+    search_term_overrides: dict[str, str] | None = None,
 ) -> StageResponse:
     run_id = run_config["run_id"]
     beats_path = input_dir / "beats.json"
@@ -158,9 +159,10 @@ def main(
     call_failures = 0
     now = datetime.now(timezone.utc).isoformat()
 
+    search_term_overrides = search_term_overrides or {}
     for beat in beats:
         beat_id = beat["beat_id"]
-        query = extract_search_terms(beat["visual_description"])
+        query = search_term_overrides.get(beat_id) or extract_search_terms(beat["visual_description"])
         beat_candidates = []
         for source_name, source in sources.items():
             cache_key = (source_name, query)

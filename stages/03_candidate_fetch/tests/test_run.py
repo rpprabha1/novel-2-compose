@@ -124,6 +124,37 @@ def test_main_complete_with_mocked_sources(tmp_path):
     _clean_run_dir(run_id)
 
 
+def test_search_term_overrides_used_instead_of_mechanical_extraction(tmp_path):
+    # 2026-07-18: search_term_overrides lets a human supply a better query
+    # for specific beats (e.g. ones that scored too low in Stage 04 with
+    # the mechanical keyword-stripped query) without touching the beat's
+    # own visual_description, which other stages also rely on.
+    run_id = "test_run_03_override"
+    _clean_run_dir(run_id)
+    input_dir = tmp_path / "inputs"
+    output_dir = tmp_path / "outputs"
+    beats = json.loads(json.dumps(BEATS_JSON))
+    beats["run_id"] = run_id
+    _write_beats(input_dir, beats)
+    fake = FakeSource("pexels", [])
+
+    response = run.main(
+        input_dir, output_dir, {"run_id": run_id},
+        sources={"pexels": fake}, max_results=5,
+        search_term_overrides={"ch1_sc1_b002": "woman opening old trunk vintage photographs"},
+    )
+
+    assert response.status.value == "COMPLETE"
+    candidates = json.loads((output_dir / "candidates.json").read_text(encoding="utf-8"))
+    by_id = {b["beat_id"]: b for b in candidates["candidates_by_beat"]}
+    assert by_id["ch1_sc1_b002"]["search_terms"] == ["woman opening old trunk vintage photographs"]
+    # b001 had no override - still uses the mechanical extraction
+    assert by_id["ch1_sc1_b001"]["search_terms"] != ["woman opening old trunk vintage photographs"]
+    assert "attic" in by_id["ch1_sc1_b001"]["search_terms"][0]
+
+    _clean_run_dir(run_id)
+
+
 def test_main_caches_repeated_queries(tmp_path):
     run_id = "test_run_03_cache"
     _clean_run_dir(run_id)

@@ -183,7 +183,15 @@ def main(
 
     audio_spec = audio_spec or yaml.safe_load((REPO_ROOT / "config" / "audio_spec.yaml").read_text(encoding="utf-8"))
     tone = run_config.get("tone", "")
-    allowed_mood_tags = set(audio_spec["tone_music_tags"].get(tone, []))
+    # Union of the tone's allowed list and whatever moods this run's own beats
+    # actually carry (audio_spec.yaml's own comment documents this union -
+    # the tone list alone was a real bug: a beat legitimately tagged outside
+    # the tone's list, e.g. "romantic" beats in a gothic-suspense scene,
+    # made every cue covering it schema-unsatisfiable regardless of model
+    # quality, since the agent is shown that beat's real mood_tags but
+    # validated against a narrower set it was never told to stay within).
+    beat_mood_tags = {tag for bid in ordered_beat_ids for tag in beats_by_id[bid].get("mood_tags", [])}
+    allowed_mood_tags = set(audio_spec["tone_music_tags"].get(tone, [])) | beat_mood_tags
     target_lufs = audio_spec["loudness"]["target_lufs"]
     ducking_depth_db = audio_spec["ducking"]["depth_db"]
     ducking_attack_ms = audio_spec["ducking"]["attack_ms"]

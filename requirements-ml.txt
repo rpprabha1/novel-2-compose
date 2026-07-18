@@ -1,0 +1,19 @@
+# ML/agent-stage dependencies - large, only needed by the stages that do
+# local model inference:
+#   - 04_clip_reranking: shared/embeddings (CLIP via transformers)
+#   - 06_fallback_generation: shared/generation/image_backend.py (diffusers, sd-turbo)
+#   - 09_audio_production: shared/generation/tts_backend.py (piper-tts CLI)
+# Installed by scripts/setup.py unless run with --core-only. torch is
+# installed as a CPU-only build to match config/embeddings.yaml and
+# config/image_gen.yaml, which both hardcode device: cpu.
+# torch>=2.4 required: transformers>=4.40/diffusers>=0.27 both need it at
+# runtime (transformers silently disables PyTorch support below 2.4;
+# diffusers crashes on import below 2.4 - no torch.xpu attribute). A loose
+# torch>=2.2 bound let pip's resolver land on 2.2.0, which satisfied the
+# version string but broke both at import time - caught during a real setup run.
+torch>=2.4
+transformers>=4.40
+diffusers>=0.27
+accelerate>=0.30
+safetensors>=0.4
+piper-tts>=1.2

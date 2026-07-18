@@ -58,6 +58,27 @@ def _assets(specs: list[tuple[str, float]]) -> dict:
     }
 
 
+def _multi_assets(beat_id: str, specs: list[tuple[str, float, int]]) -> dict:
+    """specs: list of (asset_id, duration_s, rank) for a single beat_id."""
+    return {
+        "run_id": "test_run_07",
+        "scene_id": "ch1_sc1",
+        "assets": [
+            {
+                "beat_id": beat_id,
+                "asset_id": aid,
+                "origin": "retrieved_verified",
+                "file_ref": f"cache/{aid}.mp4",
+                "duration_s": dur,
+                "rank": rank,
+                "license": "Pexels License",
+                "attribution": {"source": "pexels", "creator_required": False},
+            }
+            for aid, dur, rank in specs
+        ],
+    }
+
+
 def _plan_json(entries: list[dict]) -> str:
     return json.dumps({"beats": entries})
 
@@ -215,18 +236,154 @@ def test_hold_duration_far_outside_tolerance_still_blocks(tmp_path):
     assert not (output_dir / "edit_plan.json").exists()
 
 
-def test_omitting_agent_call_uses_default(tmp_path, monkeypatch):
-    # Regression test: main() previously never defaulted agent_call to
-    # _default_agent_call, so omitting it raised "'NoneType' object is not
-    # callable" instead of reaching the (mocked-here) real backend. Every
-    # other test passes agent_call explicitly, so none of them caught this.
+def test_multi_angle_shots_split_across_assets_no_over_subdivision(tmp_path):
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    beats = _beats([("b1", 8.0)])
+    assets = _multi_assets("b1", [("asset_b1_a", 20.0, 1), ("asset_b1_b", 20.0, 2)])
+    _write(input_dir, beats, assets)
+    # 4 shots total, but split 2-and-2 across two distinct assets - the
+    # per-asset threshold (3) is never exceeded even though the beat-total
+    # shot count (4) would have tripped the old beat-level check.
+    shots = [
+        {"shot_id": "b1_s1", "in_s": 0.0, "out_s": 4.0, "hold_duration_s": 4.0},
+        {"shot_id": "b1_s2", "asset_id": "asset_b1_b", "in_s": 0.0, "out_s": 4.0, "hold_duration_s": 4.0},
+    ]
+    plan = _plan_json([{"beat_id": "b1", "asset_id": "asset_b1_a", "shots": shots, "transition_out": "hard-cut", "rationale": ""}])
+    vocab = {**VOCAB, "pacing_presets": {"standard": {"hold_duration_s": {"min": 3.0, "max": 4.0}, "max_shots_per_beat": 4}}}
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG, agent_call=lambda s, u: plan, thresholds=THRESHOLDS, vocab=vocab)
+
+    assert response.status.value == "COMPLETE"
+    out = json.loads((output_dir / "edit_plan.json").read_text(encoding="utf-8"))
+    assert out["beats"][0]["shots"][1]["asset_id"] == "asset_b1_b"
+    assert out["total_runtime_s"] == 8.0
+
+
+def test_over_subdivided_still_triggers_per_asset_even_with_multiple_assets(tmp_path):
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    beats = _beats([("b1", 16.0)])
+    assets = _multi_assets("b1", [("asset_b1_a", 40.0, 1), ("asset_b1_b", 40.0, 2)])
+    _write(input_dir, beats, assets)
+    # 4 shots on asset_b1_a, 1 on asset_b1_b - the primary asset alone
+    # exceeds the per-asset threshold of 3, so this must still trigger.
+    shots = [
+        {"shot_id": "b1_s1", "in_s": 0.0, "out_s": 4.0, "hold_duration_s": 4.0},
+        {"shot_id": "b1_s2", "in_s": 4.0, "out_s": 8.0, "hold_duration_s": 4.0},
+        {"shot_id": "b1_s3", "in_s": 8.0, "out_s": 12.0, "hold_duration_s": 4.0},
+        {"shot_id": "b1_s4", "in_s": 12.0, "out_s": 16.0, "hold_duration_s": 4.0},
+        {"shot_id": "b1_s5", "asset_id": "asset_b1_b", "in_s": 0.0, "out_s": 4.0, "hold_duration_s": 4.0},
+    ]
+    plan = _plan_json([{"beat_id": "b1", "asset_id": "asset_b1_a", "shots": shots, "transition_out": "hard-cut", "rationale": "many angles"}])
+    vocab = {**VOCAB, "pacing_presets": {"standard": {"hold_duration_s": {"min": 3.0, "max": 4.0}, "max_shots_per_beat": 5}}}
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG, agent_call=lambda s, u: plan, thresholds=THRESHOLDS, vocab=vocab)
+
+    assert response.status.value == "NEEDS_INPUT"
+    assert any(item.reason_code == "over_subdivided_shots" for item in response.needs_input)
+
+
+def test_shot_referencing_unknown_asset_id_needs_input(tmp_path):
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    beats = _beats([("b1", 3.0)])
+    assets = _multi_assets("b1", [("asset_b1_a", 10.0, 1)])
+    _write(input_dir, beats, assets)
+    plan = _plan_json(
+        [{"beat_id": "b1", "asset_id": "asset_b1_a", "shots": [{"shot_id": "b1_s1", "asset_id": "nonexistent_asset", "in_s": 0, "out_s": 3.0, "hold_duration_s": 3.0}], "transition_out": "hard-cut", "rationale": ""}]
+    )
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG, agent_call=lambda s, u: plan, thresholds=THRESHOLDS, vocab=VOCAB)
+
+    assert response.status.value == "NEEDS_INPUT"
+    assert response.needs_input[0].reason_code == "edit_plan_incomplete"
+    assert not (output_dir / "edit_plan.json").exists()
+
+
+def test_omitting_agent_call_uses_deterministic_default(tmp_path):
+    # 2026-07-18: main() defaults to _build_deterministic_edit_plan (CODE)
+    # when agent_call is omitted, not the real Ollama backend - the agent
+    # proved unreliable at shot-to-asset assignment across multiple models
+    # (see DECISIONS_LOG.md). One shot per available asset, no agent call.
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    beats = _beats([("b1", 3.0)])
+    assets = _assets([("b1", 10.0)])
+    _write(input_dir, beats, assets)
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG, thresholds=THRESHOLDS, vocab=VOCAB)
+
+    assert response.status.value == "COMPLETE"
+    out = json.loads((output_dir / "edit_plan.json").read_text(encoding="utf-8"))
+    assert len(out["beats"][0]["shots"]) == 1  # only one asset available for b1
+
+
+def test_explicit_agent_call_still_routes_to_agent_mode(tmp_path):
+    # Agent mode remains available by explicitly passing agent_call - not
+    # deleted, just no longer the default. Confirms the branch in main()
+    # still calls a provided agent_call rather than always going deterministic.
     input_dir, output_dir = tmp_path / "in", tmp_path / "out"
     beats = _beats([("b1", 3.0)])
     assets = _assets([("b1", 10.0)])
     _write(input_dir, beats, assets)
     plan = _plan_json([{"beat_id": "b1", "asset_id": "asset_b1", "shots": [{"shot_id": "b1_s1", "in_s": 0, "out_s": 3.0, "hold_duration_s": 3.0}], "transition_out": "hard-cut", "rationale": ""}])
-    monkeypatch.setattr(run, "_default_agent_call", lambda s, u: plan)
+    calls = []
 
-    response = run.main(input_dir, output_dir, RUN_CONFIG, thresholds=THRESHOLDS, vocab=VOCAB)
+    def fake_agent_call(system_prompt, user_message):
+        calls.append((system_prompt, user_message))
+        return plan
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG, agent_call=fake_agent_call, thresholds=THRESHOLDS, vocab=VOCAB)
 
     assert response.status.value == "COMPLETE"
+    assert len(calls) == 1  # agent_call was actually invoked, not bypassed
+
+
+def test_deterministic_mode_uses_every_available_asset_as_a_shot(tmp_path):
+    # Core of the 2026-07-18 change: multiple available_assets -> multiple
+    # shots, each a DIFFERENT real asset, no LLM judgment involved.
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    beats = _beats([("b1", 9.0)])
+    assets = _multi_assets("b1", [("asset_b1_a", 20.0, 1), ("asset_b1_b", 20.0, 2), ("asset_b1_c", 20.0, 3)])
+    _write(input_dir, beats, assets)
+    vocab = {**VOCAB, "pacing_presets": {"standard": {"hold_duration_s": {"min": 3.0, "max": 4.0}, "max_shots_per_beat": 4}}}
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG, thresholds=THRESHOLDS, vocab=vocab)
+
+    assert response.status.value == "COMPLETE"
+    out = json.loads((output_dir / "edit_plan.json").read_text(encoding="utf-8"))
+    shots = out["beats"][0]["shots"]
+    assert len(shots) == 3
+    resolved_assets = {shots[0].get("asset_id") or out["beats"][0]["asset_id"]} | {s["asset_id"] for s in shots[1:]}
+    assert resolved_assets == {"asset_b1_a", "asset_b1_b", "asset_b1_c"}  # every shot a different real asset
+    for shot in shots:
+        assert 3.0 <= shot["hold_duration_s"] <= 4.0
+
+
+def test_deterministic_mode_caps_shots_at_max_shots_per_beat(tmp_path):
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    beats = _beats([("b1", 9.0)])
+    assets = _multi_assets("b1", [("asset_b1_a", 20.0, 1), ("asset_b1_b", 20.0, 2), ("asset_b1_c", 20.0, 3)])
+    _write(input_dir, beats, assets)
+    vocab = {**VOCAB, "pacing_presets": {"standard": {"hold_duration_s": {"min": 3.0, "max": 4.0}, "max_shots_per_beat": 2}}}
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG, thresholds=THRESHOLDS, vocab=vocab)
+
+    assert response.status.value == "COMPLETE"
+    out = json.loads((output_dir / "edit_plan.json").read_text(encoding="utf-8"))
+    assert len(out["beats"][0]["shots"]) == 2
+
+
+def test_deterministic_mode_skips_assets_under_min_shot_length(tmp_path):
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    beats = _beats([("b1", 9.0)])
+    # rank-2 asset is under min_viable_shot_length_s (1.5s) - should be skipped, not used as a shot.
+    assets = _multi_assets("b1", [("asset_b1_a", 20.0, 1), ("asset_b1_b", 0.8, 2), ("asset_b1_c", 20.0, 3)])
+    _write(input_dir, beats, assets)
+    vocab = {**VOCAB, "pacing_presets": {"standard": {"hold_duration_s": {"min": 3.0, "max": 4.0}, "max_shots_per_beat": 4}}}
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG, thresholds=THRESHOLDS, vocab=vocab)
+
+    assert response.status.value == "COMPLETE"
+    out = json.loads((output_dir / "edit_plan.json").read_text(encoding="utf-8"))
+    shots = out["beats"][0]["shots"]
+    resolved_assets = {shots[0].get("asset_id") or out["beats"][0]["asset_id"]} | {s.get("asset_id") for s in shots[1:] if s.get("asset_id")}
+    assert "asset_b1_b" not in resolved_assets
+    assert len(shots) == 2

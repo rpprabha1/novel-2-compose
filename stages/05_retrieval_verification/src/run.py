@@ -64,7 +64,7 @@ def _default_embedder(run_id: str) -> EmbeddingCache:
     return EmbeddingCache(model_name=cfg["clip"]["model"], device=cfg["clip"]["device"], cache_dir=cache_dir)
 
 
-def _asset_entry(run_id: str, beat_id: str, candidate: dict, score: float) -> dict:
+def _asset_entry(run_id: str, beat_id: str, candidate: dict, score: float, rank: int) -> dict:
     return {
         "beat_id": beat_id,
         "asset_id": candidate["candidate_id"],
@@ -72,6 +72,7 @@ def _asset_entry(run_id: str, beat_id: str, candidate: dict, score: float) -> di
         "file_ref": f"shared/runs/{run_id}/cache/videos/{candidate['candidate_id']}.mp4",
         "duration_s": candidate["duration_s"],
         "confidence": round(score, 4),
+        "rank": rank,
         "license": candidate["license"],
         "attribution": {
             "source": candidate["source"],
@@ -116,6 +117,7 @@ def main(
     top_k = thresholds["retrieval_verification"]["top_k"]
     n_frames = thresholds["retrieval_verification"]["frames_per_candidate"]
     margin = thresholds["clip_reranking"]["close_score_margin"]
+    assets_per_beat = thresholds["retrieval_verification"].get("assets_per_beat", 1)
     hitl_decisions = hitl_decisions or {}
 
     video_cache_dir = REPO_ROOT / "shared" / "runs" / run_id / "cache" / "videos"
@@ -191,15 +193,20 @@ def main(
                         "which isn't among its verified candidates."
                     ),
                 )
-            assets.append(_asset_entry(run_id, beat_id, match[0], match[1]))
-            asset_id_to_url[match[0]["candidate_id"]] = match[0]["url"]
+            others = [pair for pair in verified if pair[0]["candidate_id"] != chosen_id]
+            ranked_for_beat = [match] + others[: max(assets_per_beat - 1, 0)]
+            for rank, (candidate, score) in enumerate(ranked_for_beat, start=1):
+                assets.append(_asset_entry(run_id, beat_id, candidate, score, rank))
+                asset_id_to_url[candidate["candidate_id"]] = candidate["url"]
             continue
 
         top_candidate, top_score = verified[0]
         second_score = verified[1][1] if len(verified) > 1 else -1.0
         if len(verified) == 1 or (top_score - second_score) >= margin:
-            assets.append(_asset_entry(run_id, beat_id, top_candidate, top_score))
-            asset_id_to_url[top_candidate["candidate_id"]] = top_candidate["url"]
+            ranked_for_beat = verified[:assets_per_beat]
+            for rank, (candidate, score) in enumerate(ranked_for_beat, start=1):
+                assets.append(_asset_entry(run_id, beat_id, candidate, score, rank))
+                asset_id_to_url[candidate["candidate_id"]] = candidate["url"]
         else:
             needs_input_items.append(
                 NeedsInputItem(

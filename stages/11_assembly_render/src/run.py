@@ -11,6 +11,7 @@ made here that weren't already fixed upstream (CLAUDE.md).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -73,7 +74,17 @@ def main(input_dir: Path, output_dir: Path, run_config: dict, render_cfg: dict |
     normalized: list[Path] = []
     for clip in clips:
         src = REPO_ROOT / clip["file_ref"]
-        dest = cache_dir / f"norm_{clip['shot_id']}.mp4"
+        # Cache key includes the clip's actual source parameters, not just
+        # shot_id - a real bug (caught 2026-07-18): shot_id alone let a
+        # re-run with a changed edit_plan/timeline.json (same run_id, same
+        # shot_ids, different file_ref/source_in_s/source_out_s) silently
+        # reuse stale normalized clips from an earlier render instead of
+        # regenerating them, producing a final.mp4 that mixed correct and
+        # leftover-wrong content/durations with no error or warning.
+        cache_key = hashlib.sha256(
+            f"{clip['file_ref']}|{clip['source_in_s']}|{clip['source_out_s']}".encode()
+        ).hexdigest()[:16]
+        dest = cache_dir / f"norm_{clip['shot_id']}_{cache_key}.mp4"
         try:
             if not dest.exists():
                 normalize_clip(src, clip["source_in_s"], clip["source_out_s"], width, height, fps, video_codec, crf, dest)

@@ -9,7 +9,7 @@
     "run_id": { "type": "string" },
     "manuscript_ref": { "type": "string", "description": "Path to the source manuscript text for this run" },
     "tone": { "type": "string", "description": "Free-text tone label, e.g. gothic-suspense; maps to config/audio_spec.yaml tone->music-tag table" },
-    "pacing": { "type": "string", "enum": ["slow-burn", "standard", "fast-cut"], "description": "Must match a preset in config/editorial_vocab.yaml" },
+    "pacing": { "type": "string", "enum": ["slow-burn", "standard", "fast-cut", "dynamic"], "description": "Must match a preset in config/editorial_vocab.yaml" },
     "music_intensity_curve": { "type": "string", "enum": ["flat", "rising", "falling", "rise-fall"] },
     "scene_marker_convention": {
       "type": "object",

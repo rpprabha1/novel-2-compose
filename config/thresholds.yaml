@@ -24,6 +24,12 @@ retrieval_verification:
   top_k: 3
   # Frames sampled per candidate video (evenly spaced) for re-scoring.
   frames_per_candidate: 3
+  # How many verified candidates per beat to retain in assets_manifest.json
+  # (ranked 1..N, rank 1 = the winning/primary asset). Lets 07_editorial_direction
+  # cut a beat across multiple distinct clips ("camera angles") instead of only
+  # ever having the single winning asset available. Assets beyond this count
+  # were still downloaded/verified but are dropped, same as before this existed.
+  assets_per_beat: 3
 
 editorial:
   # A beat's winning asset shorter than this (seconds) cannot be used as-is;

@@ -29,6 +29,7 @@
               "additionalProperties": false,
               "properties": {
                 "shot_id": { "type": "string" },
+                "asset_id": { "type": "string", "description": "Which of the beat's available_assets this shot draws footage from. Omit to use the beat-level asset_id (the primary/rank-1 asset) - this is the default for a single-shot beat. Set explicitly to cut to a different verified asset (a different camera angle) for this shot." },
                 "in_s": { "type": "number", "minimum": 0, "description": "Start of the usable source window for this shot (the portion of the asset judged relevant)" },
                 "out_s": { "type": "number", "exclusiveMinimum": 0, "description": "End of the usable source window. This is an availability ceiling, not the actual trim point - 08_timeline_builder trims to [in_s, in_s + hold_duration_s], which must be <= out_s. out_s may exceed in_s + hold_duration_s (more usable footage was available than what's shown)." },
                 "hold_duration_s": { "type": "number", "exclusiveMinimum": 0, "description": "Actual on-screen duration - the authoritative value 08_timeline_builder uses to trim and place this shot. Must fall within config/editorial_vocab.yaml's allowed range for the active pacing preset, and must be <= (out_s - in_s)." }

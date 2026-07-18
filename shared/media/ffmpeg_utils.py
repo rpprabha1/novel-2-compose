@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import textwrap
 from pathlib import Path
 
 
@@ -95,3 +96,50 @@ def ken_burns_zoompan(
     )
     if result.returncode != 0 or not output_path.exists():
         raise FFmpegError(f"ffmpeg Ken Burns zoompan failed for {image_path}: {result.stderr}")
+
+
+def generate_text_card(
+    text: str,
+    duration_s: float,
+    dest_path: Path,
+    width: int,
+    height: int,
+    fps: int,
+    bg_color: str,
+    text_color: str,
+    font_path: str,
+    font_size: int,
+    max_chars_per_line: int,
+) -> None:
+    """Lightweight ffmpeg-only fallback visual: wrapped text over a solid
+    background, rendered directly as a video-length clip - no diffusion
+    model, no still-image intermediate. 06_fallback_generation's default
+    CODE path (see ARCHITECTURE.md 2026-07-18) for beats with no matched
+    footage, chosen after sd-turbo repeatedly exhausted RAM/disk on a
+    constrained dev machine; this has no such risk since it's pure ffmpeg."""
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    wrapped = textwrap.fill(text, width=max_chars_per_line)
+    textfile_path = dest_path.with_suffix(".txt")
+    textfile_path.write_text(wrapped, encoding="utf-8")
+    try:
+        # drawtext's textfile=/fontfile= both need literal colons (Windows
+        # drive letters) escaped for the ffmpeg filtergraph parser.
+        textfile_arg = str(textfile_path).replace("\\", "/").replace(":", "\\:")
+        fontfile_arg = font_path.replace("\\", "/").replace(":", "\\:")
+        vf = (
+            f"drawtext=textfile='{textfile_arg}':fontfile='{fontfile_arg}':"
+            f"fontcolor={text_color}:fontsize={font_size}:line_spacing=12:"
+            f"x=(w-text_w)/2:y=(h-text_h)/2:box=1:boxcolor=black@0.45:boxborderw=24"
+        )
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c={bg_color}:s={width}x{height}:d={duration_s}:r={fps}",
+                "-vf", vf, "-pix_fmt", "yuv420p", str(dest_path),
+            ],
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        textfile_path.unlink(missing_ok=True)
+    if result.returncode != 0 or not dest_path.exists():
+        raise FFmpegError(f"ffmpeg text card generation failed for {dest_path}: {result.stderr}")

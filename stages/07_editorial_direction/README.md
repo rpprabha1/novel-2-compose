@@ -1,10 +1,14 @@
 # 07_editorial_direction
 
-**Type:** AGENT — fully specified in `CLAUDE.md` §4 and `ARCHITECTURE.md` §2 (not repeated here, that's the source of truth).
+**Type:** CODE by default, AGENT opt-in — reclassified 2026-07-18 (see `ARCHITECTURE.md` change log; full spec still in `CLAUDE.md` §4 and `ARCHITECTURE.md` §2, not repeated here).
 
 ## Purpose
 
-Given approved beats + winning assets + run config (tone, pacing), decides shot subdivision, hold durations, and transitions per beat boundary — creative judgment constrained entirely by `config/editorial_vocab.yaml`.
+Given approved beats + winning assets + run config (tone, pacing), decides shot subdivision, hold durations, and transitions per beat boundary — constrained entirely by `config/editorial_vocab.yaml`.
+
+**Multi-angle cutting (2026-07-17, see `ARCHITECTURE.md`).** Each beat carries its full `available_assets` list (rank-1 primary plus any additional verified candidates `05_retrieval_verification` retained — see that stage's README). A shot may set its own `asset_id` to cut to a non-primary asset; omitting it defaults to the beat's primary asset. The over-subdivision HITL check (`hitl_shot_subdivision_threshold`) counts shots *per resolved asset*, not per beat, so a beat legitimately cut across several angles doesn't false-trigger.
+
+**CODE by default (2026-07-18, see `ARCHITECTURE.md`).** On a real run, the agent (across both `llama3.2:1b` and `llama3.2:3b`) consistently failed to actually distribute shots across different `available_assets` despite being instructed to — hallucinating asset_ids, cross-contaminating one beat's asset onto another, or just reusing the primary asset for every shot. `main()` now defaults to `_build_deterministic_edit_plan()`: every retained verified asset (at or above `min_viable_shot_length_s`, capped at the pacing preset's `max_shots_per_beat`) mechanically becomes its own shot, used as-is, `transition_out` always `hard-cut` — no LLM call, no creative judgment for shot/asset assignment. AGENT mode is still fully implemented and available by passing an explicit `agent_call` (e.g. `agent_call=run._default_agent_call` for the real Ollama backend); every existing HITL check (`edit_plan_incomplete`, `over_subdivided_shots`, `repeated_dramatic_transition`, `runtime_drift`) runs unchanged against either path's output.
 
 ## I/O
 
@@ -13,10 +17,10 @@ Given approved beats + winning assets + run config (tone, pacing), decides shot 
 
 ## Run / test instructions
 
-Implemented, using `shared/agents/` (Ollama, same as Stages 02/06):
+Implemented. Uses `shared/agents/` (Ollama) only in the opt-in AGENT mode:
 
 ```
-python -m pytest stages/07_editorial_direction/tests/ -v   # mocked agent, no model calls
+python -m pytest stages/07_editorial_direction/tests/ -v   # both modes covered, no model calls
 
 python stages/07_editorial_direction/src/run.py \
   stages/07_editorial_direction/inputs \
@@ -41,3 +45,4 @@ A near-miss `hold_duration_s` (within `config/thresholds.yaml`'s `editorial.hold
 - [ ] Every non-default choice has a one-line rationale — **not currently true on the real run** (see Known gap above).
 - [x] Beats with an asset shorter than `editorial.min_viable_shot_length_s` are flagged `NEEDS_INPUT` (reason `asset_too_short`), never stretched/looped (unit-tested; not exercised on the real run since no asset was that short).
 - [x] HITL triggers fire per `CLAUDE.md` §4 (>3 shots from one asset; repeated "dramatic" transition on adjacent beats; >15% runtime drift — this one fired for real and was resolved).
+- [x] Multi-angle: a shot's `asset_id` (when set) must be one of that beat's `available_assets`, else `edit_plan_incomplete` (unit-tested); per-asset shot counts, not per-beat totals, drive the over-subdivision HITL check (unit-tested, not yet exercised on a real multi-angle run).

@@ -33,6 +33,12 @@ pacing_presets:
   fast-cut:
     hold_duration_s: { min: 0.5, max: 2.0 }
     max_shots_per_beat: 3
+  dynamic:
+    # A different shot (ideally a different available_asset - a different
+    # camera angle) roughly every 3-4s, to keep a scene from reading as one
+    # long static hold. See DECISIONS_LOG.md 2026-07-17.
+    hold_duration_s: { min: 3.0, max: 4.0 }
+    max_shots_per_beat: 4
 
 # Subdividing one asset into more than this many shots is always a HITL
 # trigger (CLAUDE.md section 4), independent of pacing preset.
