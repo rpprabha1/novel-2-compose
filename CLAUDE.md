@@ -47,6 +47,7 @@ An agentic pipeline that takes a chapter/scene from the author's own novel — *
 | 10_human_review_gate | **CODE** + human | Contact-sheet HTML generation is code; decisions are human. No agent. |
 | 11_assembly_render | **CODE** | ffmpeg trim/concat/grade/mux from `timeline.json` + `audio_mix.json`. Fully deterministic. |
 | 12_qa_attribution | **CODE** | Schema validation, license/attribution completeness, duration checks, loudness spec check. |
+| 13_pixel_art_conversion | **CODE** | Added 2026-07-18 (see `ARCHITECTURE.md` change log): restyles the approved `final.mp4` into a retro pixel-art look (nearest-neighbor downscale/upscale + dithered palette reduction, all ffmpeg). The creative call (which of 3 sampled techniques to use) was already made by the human reviewing real samples before this stage was built — nothing left here is judgment-shaped. Produces `final_pixel_art.mp4` alongside, never replacing, `final.mp4`. |
 
 If a step is not in this table, classify it before building it and log the classification.
 
@@ -87,7 +88,8 @@ novel-to-video/
     ├── 09_audio_production/
     ├── 10_human_review_gate/
     ├── 11_assembly_render/
-    └── 12_qa_attribution/
+    ├── 12_qa_attribution/
+    └── 13_pixel_art_conversion/
 ```
 
 Each stage folder: `README.md` (purpose, I/O, run/test instructions, numeric pass criterion, review checklist), `AGENT_PROMPT.md` (agent/hybrid stages only), `src/` with single `run.py` entrypoint, `tests/` (synthetic fixtures only), gitignored `inputs/` and `outputs/`.

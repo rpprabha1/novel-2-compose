@@ -30,6 +30,25 @@ def probe_duration_s(video_path: Path) -> float:
         raise FFmpegError(f"ffprobe returned no duration for {video_path}: {result.stdout}") from exc
 
 
+def probe_resolution(video_path: Path) -> tuple[int, int]:
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height", "-of", "json", str(video_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise FFmpegError(f"ffprobe failed for {video_path}: {result.stderr}")
+    data = json.loads(result.stdout)
+    try:
+        stream = data["streams"][0]
+        return int(stream["width"]), int(stream["height"])
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        raise FFmpegError(f"ffprobe returned no video stream/resolution for {video_path}: {result.stdout}") from exc
+
+
 def extract_frames(video_path: Path, output_dir: Path, n_frames: int = 3) -> list[Path]:
     """Extracts n_frames evenly spaced frames (avoiding the very first/last
     instant) as jpg stills."""

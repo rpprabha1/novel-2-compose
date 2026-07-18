@@ -1,0 +1,25 @@
+# pixel_art_spec.yaml — tunables for 13_pixel_art_conversion.
+#
+# Nearest-neighbor downscale/upscale + a reduced, dithered color palette
+# (retro game look) - CODE, fully deterministic. Chosen 2026-07-18 after the
+# human reviewed 3 real ffmpeg-only samples rendered from the real final.mp4
+# (plain nearest-neighbor block, ffmpeg's pixelize filter, this palette-limited
+# approach) and picked this one for its authentic dithered "retro pixel art"
+# look over the plainer soft-block variants. See ARCHITECTURE.md change log.
+
+# Source resolution is divided by this factor to get the pixel grid size
+# (rounded to the nearest even number, minimum 2x2) - keeps block size
+# proportional to whatever resolution final.mp4 actually is, rather than a
+# fixed absolute grid (CLAUDE.md rule 11: no run/resolution-specific values).
+# 12 reproduces the exact 160x90 grid from the human-approved sample_C on
+# this project's 1920x1080 render.yaml output (1920/12=160, 1080/12=90).
+downscale_factor: 12
+
+# Palette size passed to ffmpeg's palettegen.
+max_colors: 32
+palettegen_stats_mode: diff
+
+# paletteuse dithering - bayer ordered dither gives the visible retro
+# color-speckle look; bayer_scale controls dither pattern coarseness.
+dither_method: bayer
+bayer_scale: 3

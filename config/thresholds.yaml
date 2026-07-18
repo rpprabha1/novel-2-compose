@@ -49,3 +49,8 @@ editorial:
 qa:
   # Final duration vs. planned duration tolerance for QA's duration_tolerance check.
   duration_tolerance_pct: 5
+
+pixel_art:
+  # 13_pixel_art_conversion only re-filters existing frames (no cuts/re-timing),
+  # so output duration should match the source almost exactly.
+  duration_tolerance_pct: 1
