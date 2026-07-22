@@ -23,7 +23,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from shared.envelopes import ErrorInfo, NeedsInputItem, StageResponse, StageStatus, validate_against_schema  # noqa: E402
 from shared.manifest import append_manifest_entries  # noqa: E402
-from shared.sources import FootageSource, PexelsSource, PixabaySource  # noqa: E402
+from shared.sources import ArchiveOrgSource, FootageSource, PexelsSource, PixabaySource, WikimediaCommonsSource  # noqa: E402
 
 STAGE_NAME = "03_candidate_fetch"
 
@@ -75,6 +75,10 @@ def _default_sources() -> dict[str, FootageSource]:
         sources["pexels"] = PexelsSource(api_key=env["PEXELS_API_KEY"])
     if env.get("PIXABAY_API_KEY"):
         sources["pixabay"] = PixabaySource(api_key=env["PIXABAY_API_KEY"])
+    # Keyless approved sources (LICENSES.md rows since 2026-07-14, implemented
+    # 2026-07-23 - see ARCHITECTURE.md change log): always available.
+    sources["wikimedia"] = WikimediaCommonsSource()
+    sources["archive_org"] = ArchiveOrgSource()
     return sources
 
 
