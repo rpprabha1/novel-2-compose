@@ -166,7 +166,13 @@ def main(
     search_term_overrides = search_term_overrides or {}
     for beat in beats:
         beat_id = beat["beat_id"]
-        query = search_term_overrides.get(beat_id) or extract_search_terms(beat["visual_description"])
+        # Priority: explicit override > agent-written search_query (2026-07-23,
+        # see beats.schema.json) > mechanical keyword extraction fallback.
+        query = (
+            search_term_overrides.get(beat_id)
+            or (beat.get("search_query") or "").strip()
+            or extract_search_terms(beat["visual_description"])
+        )
         beat_candidates = []
         for source_name, source in sources.items():
             cache_key = (source_name, query)

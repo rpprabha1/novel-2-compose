@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import importlib.util
 import json
 import sys
@@ -244,7 +246,7 @@ def test_missing_input_files_fails(tmp_path):
     assert response.status.value == "FAILED"
 
 
-def test_narration_reconciliation_extends_hold_when_asset_covers_it(tmp_path):
+def test_narration_reconciliation_tiles_single_long_asset_into_fresh_windows(tmp_path):
     input_dir, output_dir = tmp_path / "in", tmp_path / "out"
     edit_plan = {
         "run_id": "test_run_08",
@@ -259,9 +261,17 @@ def test_narration_reconciliation_extends_hold_when_asset_covers_it(tmp_path):
 
     assert response.status.value == "COMPLETE"
     out = json.loads((output_dir / "timeline.json").read_text(encoding="utf-8"))
-    assert out["clips"][0]["timeline_end_s"] == 14.7
-    assert out["clips"][0]["source_out_s"] == 14.7
+    # Tiled into ~4s segments (standard pacing hold_max), not one 14.7s hold.
     assert out["total_duration_s"] == 14.7
+    assert len(out["clips"]) == 4  # 4.0 + 4.0 + 4.0 + 2.7
+    # Consecutive fresh windows of the same asset - real visual progression.
+    assert out["clips"][0]["source_in_s"] == 0.0
+    assert out["clips"][1]["source_in_s"] == 4.0
+    assert out["clips"][2]["source_in_s"] == 8.0
+    assert out["clips"][3]["source_in_s"] == 12.0
+    assert out["clips"][3]["timeline_end_s"] == 14.7
+    for clip in out["clips"]:
+        assert clip["source_out_s"] <= 39.0
 
 
 def test_narration_reconciliation_leaves_hold_alone_when_already_covers_it(tmp_path):
@@ -282,15 +292,38 @@ def test_narration_reconciliation_leaves_hold_alone_when_already_covers_it(tmp_p
     assert out["clips"][0]["timeline_end_s"] == 3.0  # untouched - visual hold already sufficient
 
 
-def test_narration_reconciliation_routes_fallback_when_asset_too_short(tmp_path):
+def test_narration_reconciliation_reuses_windows_for_shortish_asset(tmp_path):
+    """A 6s asset covering 13.18s of narration now succeeds via bounded
+    window reuse (up to 3 passes) instead of routing to fallback - the
+    2026-07-23 tiling rewrite's intended behavior change."""
     input_dir, output_dir = tmp_path / "in", tmp_path / "out"
     edit_plan = {
         "run_id": "test_run_08",
         "scene_id": "ch1_sc1",
         "beats": [{"beat_id": "b1", "asset_id": "a1", "shots": [{"shot_id": "b1_s1", "in_s": 0.0, "out_s": 5.0, "hold_duration_s": 3.0}], "transition_out": "hard-cut", "rationale": ""}],
     }
-    assets = _assets([("a1", 6.0)])  # too short for the narration below
+    assets = _assets([("a1", 6.0)])
     audio_mix = _audio_mix([("b1", 0.0, 13.18)])
+    _write(input_dir, edit_plan, assets, audio_mix)
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG)
+
+    assert response.status.value == "COMPLETE"
+    out = json.loads((output_dir / "timeline.json").read_text(encoding="utf-8"))
+    assert out["total_duration_s"] == 13.18
+    for clip in out["clips"]:
+        assert clip["source_out_s"] <= 6.0
+
+
+def test_narration_reconciliation_routes_fallback_when_reuse_cannot_cover(tmp_path):
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    edit_plan = {
+        "run_id": "test_run_08",
+        "scene_id": "ch1_sc1",
+        "beats": [{"beat_id": "b1", "asset_id": "a1", "shots": [{"shot_id": "b1_s1", "in_s": 0.0, "out_s": 5.0, "hold_duration_s": 3.0}], "transition_out": "hard-cut", "rationale": ""}],
+    }
+    assets = _assets([("a1", 6.0)])  # 6s x 3 reuse passes = 18s max < 30s required
+    audio_mix = _audio_mix([("b1", 0.0, 30.0)])
     _write(input_dir, edit_plan, assets, audio_mix)
 
     response = run.main(input_dir, output_dir, RUN_CONFIG)
@@ -301,7 +334,10 @@ def test_narration_reconciliation_routes_fallback_when_asset_too_short(tmp_path)
     assert not (output_dir / "timeline.json").exists()
 
 
-def test_narration_reconciliation_scales_multi_shot_beat_proportionally(tmp_path):
+def test_narration_reconciliation_alternates_multiple_assets(tmp_path):
+    """A beat with two distinct assets tiles the narration window by
+    alternating between them (multi-angle intent sustained across the full
+    narration length), not by scaling each original shot up."""
     input_dir, output_dir = tmp_path / "in", tmp_path / "out"
     edit_plan = {
         "run_id": "test_run_08",
@@ -312,15 +348,15 @@ def test_narration_reconciliation_scales_multi_shot_beat_proportionally(tmp_path
                 "asset_id": "a1",
                 "shots": [
                     {"shot_id": "b1_s1", "in_s": 0.0, "out_s": 10.0, "hold_duration_s": 1.0},
-                    {"shot_id": "b1_s2", "in_s": 10.0, "out_s": 20.0, "hold_duration_s": 3.0},
+                    {"shot_id": "b1_s2", "in_s": 0.0, "out_s": 10.0, "hold_duration_s": 3.0, "asset_id": "a2"},
                 ],
                 "transition_out": "hard-cut",
                 "rationale": "",
             }
         ],
     }
-    assets = _assets([("a1", 39.0)])
-    audio_mix = _audio_mix([("b1", 0.0, 8.0)])  # 2x the original 4.0s total -> each shot should double
+    assets = _assets([("a1", 39.0), ("a2", 39.0)])
+    audio_mix = _audio_mix([("b1", 0.0, 16.0)])
 
     _write(input_dir, edit_plan, assets, audio_mix)
 
@@ -328,5 +364,12 @@ def test_narration_reconciliation_scales_multi_shot_beat_proportionally(tmp_path
 
     assert response.status.value == "COMPLETE"
     out = json.loads((output_dir / "timeline.json").read_text(encoding="utf-8"))
-    assert out["clips"][0]["timeline_end_s"] == 2.0  # 1.0 * 2
-    assert out["clips"][1]["timeline_end_s"] == 8.0  # 2.0 + (3.0 * 2)
+    assert out["total_duration_s"] == 16.0
+    assert len(out["clips"]) == 4  # 4s tiles alternating a1, a2, a1, a2
+    file_refs = [c["file_ref"] for c in out["clips"]]
+    assert file_refs[0] != file_refs[1]  # alternation, not repetition
+    assert file_refs[0] == file_refs[2]
+    assert file_refs[1] == file_refs[3]
+    # Second window of each asset is fresh footage, not the same window again.
+    assert out["clips"][2]["source_in_s"] == 4.0
+    assert out["clips"][3]["source_in_s"] == 4.0

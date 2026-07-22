@@ -1,10 +1,24 @@
 # tts.yaml — local TTS backend configuration for 09_audio_production's code half.
 #
-# piper-tts chosen for CPU feasibility: ONNX-based, small models (~60MB),
-# fast inference even on this hardware (~1-2s per sentence including model
-# load), noticeably more natural than classic offline TTS (same "fit the dev
-# machine" reasoning as config/agents.yaml / config/embeddings.yaml / config/image_gen.yaml).
+# engine: "kokoro" (default since 2026-07-23) or "piper" (the original).
+# Switched after the author reviewed the real chapter-1 output and found
+# Piper's lessac voice too robotic/AI-ish - Kokoro-82M (Apache-2.0, ~310MB
+# ONNX) is dramatically more natural and still CPU-feasible (~19s per beat
+# paragraph including model load, running under Python 3.12 via the py
+# launcher since kokoro-onnx needs onnxruntime>=1.20.1 / py>=3.10 while the
+# pipeline runs on 3.9). Voice chosen by the author from 4 real samples -
+# see DECISIONS_LOG.md. Piper config kept below for fallback/rollback.
 
+engine: kokoro
+
+kokoro:
+  model_path: shared/models/kokoro/kokoro-v1.0.onnx
+  voices_path: shared/models/kokoro/voices-v1.0.bin
+  voice: bm_george
+  speed: 1.0
+  python_launcher: "py -3.12"
+
+# piper (original backend, kept for rollback):
 model_path: shared/models/piper/en_US-lessac-medium.onnx
 config_path: shared/models/piper/en_US-lessac-medium.onnx.json
 length_scale: 1.0

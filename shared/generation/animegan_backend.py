@@ -80,6 +80,33 @@ def _style_frames(frames_dir: Path, styled_dir: Path, model, device: str) -> Non
         styled.save(styled_dir / frame_path.name)
 
 
+def _upscale_frames(styled_dir: Path, upscaled_dir: Path, binary_path: Path, model_name: str, scale: int) -> None:
+    """Batch Real-ESRGAN upscale of the styled frames (2026-07-23, see
+    ARCHITECTURE.md change log) - the ncnn-vulkan build runs on this
+    machine's otherwise-unusable 2GB GPU (~1.0s/frame at 960->1920 batch,
+    measured for real), where a PyTorch upscaler could not. Restores full
+    output resolution lost to the reduced stylization width."""
+    upscaled_dir.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        [
+            str(binary_path),
+            "-i", str(styled_dir),
+            "-o", str(upscaled_dir),
+            "-n", model_name,
+            "-s", str(scale),
+            "-f", "png",
+            "-m", str(binary_path.parent / "models"),
+        ],
+        capture_output=True, text=True,
+    )
+    n_in = len(list(styled_dir.glob("frame_*.png")))
+    n_out = len(list(upscaled_dir.glob("frame_*.png")))
+    if result.returncode != 0 or n_out != n_in:
+        raise AnimeGANError(
+            f"Real-ESRGAN upscale failed ({n_out}/{n_in} frames): {result.stderr[-500:] if result.stderr else 'no stderr'}"
+        )
+
+
 def _reassemble(styled_dir: Path, src_path: Path, stylize_fps: float, output_fps: int, dest_path: Path, video_codec: str, video_crf: int, audio_codec: str, audio_bitrate: str) -> None:
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
@@ -112,11 +139,15 @@ def stylize_video(
     audio_codec: str,
     audio_bitrate: str,
     work_dir: Path,
+    upscale_binary: Path | None = None,
+    upscale_model: str = "realesr-animevideov3",
+    upscale_factor: int = 2,
 ) -> None:
     """Extracts frames at (target_width, stylize_fps), runs each through the
-    AnimeGANv2 generator, reassembles at output_fps with the source audio.
-    work_dir holds intermediate frames and is removed on success; left in
-    place on failure so a crash mid-run can be inspected/resumed."""
+    AnimeGANv2 generator, optionally Real-ESRGAN-upscales the styled frames,
+    reassembles at output_fps with the source audio. work_dir holds
+    intermediate frames and is removed on success; left in place on failure
+    so a crash mid-run can be inspected/resumed."""
     model = _load_model(checkpoint_path, device)
     frames_dir = work_dir / "raw_frames"
     styled_dir = work_dir / "styled_frames"
@@ -126,6 +157,13 @@ def stylize_video(
         raise AnimeGANError(f"No frames extracted from {src_path}")
 
     _style_frames(frames_dir, styled_dir, model, device)
-    _reassemble(styled_dir, src_path, stylize_fps, output_fps, dest_path, video_codec, video_crf, audio_codec, audio_bitrate)
+
+    assemble_dir = styled_dir
+    if upscale_binary is not None:
+        upscaled_dir = work_dir / "upscaled_frames"
+        _upscale_frames(styled_dir, upscaled_dir, upscale_binary, upscale_model, upscale_factor)
+        assemble_dir = upscaled_dir
+
+    _reassemble(assemble_dir, src_path, stylize_fps, output_fps, dest_path, video_codec, video_crf, audio_codec, audio_bitrate)
 
     shutil.rmtree(work_dir, ignore_errors=True)

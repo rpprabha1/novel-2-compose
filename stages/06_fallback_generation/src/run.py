@@ -102,6 +102,7 @@ def _default_text_card_renderer(text: str, duration_s: float, dest_path: Path) -
         font_path=cfg["font_path"],
         font_size=cfg["font_size"],
         max_chars_per_line=cfg["max_chars_per_line"],
+        bg_color2=cfg.get("bg_color2"),
     )
 
 

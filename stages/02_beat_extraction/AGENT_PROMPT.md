@@ -31,6 +31,7 @@ You are not given anything else about the story — no prior scenes, no characte
    - `est_duration_s`: a rough on-screen duration in seconds, anchored to `pacing` (slow-burn: lean toward 2.5-6s per beat; standard: 1.5-4s; fast-cut: 0.5-2s), adjusted up for beats that are clearly a longer continuous action and down for a quick single-image beat.
    - `mood_tags`: 1-3 tags, only from the allowed vocabulary above, that fit this specific beat's content — not the whole scene's tone.
    - `no_visual_analog`: `true` only if this text segment is pure interior narration/exposition with nothing a camera could show; `false` otherwise.
+   - `search_query`: a short stock-footage search phrase (2-6 words) a video editor would type into a stock site to find this beat's visual. Use concrete, generic, filmable imagery words — never story-specific character names or invented proper nouns (a stock site has no footage of "Old Major"; it has footage of "large pig barn straw"). Prefer the physical subject + setting + one distinguishing action (e.g. `"pig lying straw barn"`, `"farmer walking lantern night"`, `"horses entering barn slow"`). This is a *search* phrase, not a description — drop articles, emotions, and abstractions.
 4. If a paragraph is pure interior narration (thought, memory, backstory) with no physical action described, still emit a beat entry for it with `no_visual_analog: true` and a `visual_description` that says what's absent (e.g. `"No direct visual - interior reflection on the letter's meaning"`), rather than skipping it or inventing a visual.
 5. Number `order` starting at 0 in the sequence the beats occur in the text.
 6. Assemble the final JSON object exactly matching the schema in section 9. Output only that JSON object.
@@ -93,7 +94,8 @@ Sample output for a scene with `scene_id: "ch1_sc1"`, given the opening two para
       "visual_description": "A woman climbs a narrow attic staircase, one hand trailing along a dusty bannister, as dust motes drift through a shaft of light from a high cracked window.",
       "est_duration_s": 4.0,
       "mood_tags": ["quiet", "tense"],
-      "no_visual_analog": false
+      "no_visual_analog": false,
+      "search_query": "woman climbing old staircase dust"
     },
     {
       "beat_id": "ch1_sc1_b002",
@@ -102,7 +104,8 @@ Sample output for a scene with `scene_id: "ch1_sc1"`, given the opening two para
       "visual_description": "An attic door creaks open, revealing sheeted furniture standing in rows and an old trunk with green, aged brass latches sitting alone under a window.",
       "est_duration_s": 4.5,
       "mood_tags": ["ominous", "quiet"],
-      "no_visual_analog": false
+      "no_visual_analog": false,
+      "search_query": "attic covered furniture old trunk"
     },
     {
       "beat_id": "ch1_sc1_b003",
@@ -111,7 +114,8 @@ Sample output for a scene with `scene_id: "ch1_sc1"`, given the opening two para
       "visual_description": "She kneels by the open trunk, sifting through a stack of curling photographs, then lifts out a browned, hand-written letter and begins to read it.",
       "est_duration_s": 4.0,
       "mood_tags": ["quiet", "somber"],
-      "no_visual_analog": false
+      "no_visual_analog": false,
+      "search_query": "hands old photographs letter vintage"
     }
   ]
 }

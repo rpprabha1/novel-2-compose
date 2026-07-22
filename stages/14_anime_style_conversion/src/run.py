@@ -74,6 +74,13 @@ def main(
     checkpoint_path = REPO_ROOT / "shared" / "models" / "animegan" / f"{anime_style_spec['checkpoint']}.pt"
     stylizer = stylizer or stylize_video
 
+    upscale_cfg = anime_style_spec.get("upscale") or {}
+    upscale_binary = None
+    if upscale_cfg.get("enabled"):
+        candidate = REPO_ROOT / upscale_cfg["binary_path"]
+        if candidate.exists():
+            upscale_binary = candidate
+
     with tempfile.TemporaryDirectory(prefix="anime_style_") as tmp:
         try:
             stylizer(
@@ -89,6 +96,9 @@ def main(
                 audio_codec=render_cfg["audio_codec"],
                 audio_bitrate=render_cfg["audio_bitrate"],
                 work_dir=Path(tmp) / "frames",
+                upscale_binary=upscale_binary,
+                upscale_model=upscale_cfg.get("model", "realesr-animevideov3"),
+                upscale_factor=upscale_cfg.get("scale", 2),
             )
         except AnimeGANError as exc:
             return StageResponse(

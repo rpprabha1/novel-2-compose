@@ -129,17 +129,30 @@ def generate_text_card(
     font_path: str,
     font_size: int,
     max_chars_per_line: int,
+    bg_color2: str | None = None,
 ) -> None:
-    """Lightweight ffmpeg-only fallback visual: wrapped text over a solid
+    """Lightweight ffmpeg-only fallback visual: wrapped text over the
     background, rendered directly as a video-length clip - no diffusion
     model, no still-image intermediate. 06_fallback_generation's default
     CODE path (see ARCHITECTURE.md 2026-07-18) for beats with no matched
     footage, chosen after sd-turbo repeatedly exhausted RAM/disk on a
-    constrained dev machine; this has no such risk since it's pure ffmpeg."""
+    constrained dev machine; this has no such risk since it's pure ffmpeg.
+
+    When bg_color2 is set (2026-07-23, see ARCHITECTURE.md change log), the
+    background is a slowly-drifting two-tone gradient (ffmpeg's `gradients`
+    lavfi source) instead of a flat solid - a static card holding for 20-40s
+    of narration read as dead air on the real chapter-1 output."""
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     wrapped = textwrap.fill(text, width=max_chars_per_line)
     textfile_path = dest_path.with_suffix(".txt")
     textfile_path.write_text(wrapped, encoding="utf-8")
+    if bg_color2:
+        source = (
+            f"gradients=s={width}x{height}:d={duration_s}:r={fps}:"
+            f"c0={bg_color}:c1={bg_color2}:speed=0.008:type=radial"
+        )
+    else:
+        source = f"color=c={bg_color}:s={width}x{height}:d={duration_s}:r={fps}"
     try:
         # drawtext's textfile=/fontfile= both need literal colons (Windows
         # drive letters) escaped for the ffmpeg filtergraph parser.
@@ -152,7 +165,7 @@ def generate_text_card(
         )
         result = subprocess.run(
             [
-                "ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c={bg_color}:s={width}x{height}:d={duration_s}:r={fps}",
+                "ffmpeg", "-y", "-f", "lavfi", "-i", source,
                 "-vf", vf, "-pix_fmt", "yuv420p", str(dest_path),
             ],
             capture_output=True,

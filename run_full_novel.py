@@ -37,7 +37,31 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from shared.envelopes import StageStatus  # noqa: E402
 from shared.media import generate_text_card  # noqa: E402
-from shared.sources import GeneratedMusicSource, generated_audio_downloader  # noqa: E402
+from shared.sources import GeneratedMusicSource, JamendoMusicSource, generated_audio_downloader  # noqa: E402
+
+
+def _load_env_value(key: str) -> str | None:
+    env_path = REPO_ROOT / "config" / ".env"
+    if not env_path.exists():
+        return None
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line.startswith(f"{key}="):
+            return line.partition("=")[2].strip() or None
+    return None
+
+
+def _build_music_source():
+    """Jamendo (real CC music, requires JAMENDO_CLIENT_ID in config/.env)
+    when available; the generated sine-bed placeholder otherwise. Returns
+    (music_source, downloader_or_None) - Jamendo tracks download over plain
+    HTTP so Stage 09's default downloader works; the generated source needs
+    its synthesizing pseudo-downloader."""
+    client_id = _load_env_value("JAMENDO_CLIENT_ID")
+    if client_id:
+        audio_spec = yaml.safe_load((REPO_ROOT / "config" / "audio_spec.yaml").read_text(encoding="utf-8"))
+        return JamendoMusicSource(client_id=client_id, tag_map=audio_spec.get("jamendo_tag_map") or {}), None
+    return GeneratedMusicSource(), generated_audio_downloader
 
 # NB: the run_config directory name ("animal_farm_ch1") and the run_id value
 # stored inside it ("animal_farm_ch1_2026_07_21", used by every stage to
@@ -61,6 +85,7 @@ STAGE_NAMES = {
     11: "assembly_render",
     12: "qa_attribution",
     13: "pixel_art_conversion",
+    14: "anime_style_conversion",
 }
 
 
@@ -184,8 +209,10 @@ def resolve_music_stage(run_config: dict, out_dir: Path, decisions_log: list) ->
     retrying an LLM call that has already proven unreliable this run.
     """
     main09 = stage_main(9)
-    music_source = GeneratedMusicSource()
-    kwargs = dict(music_source=music_source, downloader=generated_audio_downloader)
+    music_source, music_downloader = _build_music_source()
+    kwargs = dict(music_source=music_source)
+    if music_downloader is not None:
+        kwargs["downloader"] = music_downloader
     hitl_decisions: dict[str, str] = {}
     resp = main09(stage_dir(9) / "inputs", out_dir, run_config, **kwargs)
     for _ in range(5):
@@ -322,6 +349,7 @@ def extend_undersized_assets_for_narration(
             font_path=text_card_cfg["font_path"],
             font_size=text_card_cfg["font_size"],
             max_chars_per_line=text_card_cfg["max_chars_per_line"],
+            bg_color2=text_card_cfg.get("bg_color2"),
         )
 
         merged_assets["assets"] = [a for a in merged_assets["assets"] if a["beat_id"] != beat_id]
@@ -583,13 +611,24 @@ def run_scene(scene: dict, run_config: dict, reuse_beats: Path | None = None) ->
     record(13, resp13)
     final_pixel_path = stage_dir(13) / "outputs" / "final_pixel_art.mp4"
 
+    # --- Stage 14 (anime style - the author's chosen primary deliverable) ---
+    clean_io(14)
+    shutil.copy(final_mp4_path, stage_dir(14) / "inputs" / "final.mp4")
+    resp14 = stage_main(14)(stage_dir(14) / "inputs", stage_dir(14) / "outputs", run_config)
+    record(14, resp14)
+    final_anime_path = stage_dir(14) / "outputs" / "final_anime.mp4"
+
     # --- Archive this scene's final artifacts before the next scene's clean_io() wipes them ---
     archive_dir = REPO_ROOT / f"shared/runs/{run_config['run_id']}/chapter_outputs/{scene_id}"
     archive_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy(final_mp4_path, archive_dir / "final_raw.mp4")
     if final_pixel_path.exists():
-        shutil.copy(final_pixel_path, archive_dir / "final_styled.mp4")
-    result["final_video"] = str(archive_dir / ("final_styled.mp4" if final_pixel_path.exists() else "final_raw.mp4"))
+        shutil.copy(final_pixel_path, archive_dir / "final_pixel_art.mp4")
+    if final_anime_path.exists():
+        shutil.copy(final_anime_path, archive_dir / "final_anime.mp4")
+        result["final_video"] = str(archive_dir / "final_anime.mp4")
+    else:
+        result["final_video"] = str(archive_dir / "final_raw.mp4")
     result["completed"] = True
     return result
 

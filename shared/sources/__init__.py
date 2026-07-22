@@ -1,5 +1,6 @@
 from .archive_org import ArchiveOrgSource
 from .base import FootageCandidate, FootageSource
+from .jamendo import JamendoMusicSource
 from .generated_music import GeneratedMusicSource, generated_audio_downloader
 from .manual_music import ManualMusicSource
 from .music_base import MusicCandidate, MusicSource
@@ -17,6 +18,7 @@ __all__ = [
     "MusicCandidate",
     "MusicSource",
     "ManualMusicSource",
+    "JamendoMusicSource",
     "GeneratedMusicSource",
     "generated_audio_downloader",
 ]

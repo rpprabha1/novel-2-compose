@@ -22,6 +22,7 @@ This is the authoritative allow-list backing the Source Policy hard rule in `CLA
 | Pixabay Music | Pixabay License (free for commercial use) | No | **No** — corrected 2026-07-14; Pixabay's public API covers images/videos only, there is no documented music endpoint despite pixabay.com/music existing as a browsable site. Manual/curated download only until this changes. | Same terms family as Pixabay footage; original LICENSES.md row claiming API availability was never verified and was wrong. |
 | Mixkit (music) | Mixkit Free License | No | No official public API — manual/curated only | Free stock music. |
 | Generated / composed audio | Fully owned, no restriction | No | N/A (via generation backend in `06`/`09` code) | Output of the pipeline's own generation step, not a third-party fetch. |
+| Jamendo | Creative Commons, per-track variant (CC-BY / CC-BY-NC / CC-BY-SA etc. - exact `license_ccurl` captured per track at fetch time) | **Yes** - all CC variants require attribution; artist name recorded in the run manifest and emitted to `CREDITS.md` | Yes (api.jamendo.com v3.0, free client_id) | Added 2026-07-23 (human-approved, see `ARCHITECTURE.md` change log) - the first approved music source with a real search API. NC-variant tracks constrain commercial use of the produced video: verify each selected track's variant before commercial release. |
 
 ## Forbidden sources (hard rule, CLAUDE.md §0)
 

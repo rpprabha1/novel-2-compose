@@ -3,30 +3,69 @@
   "$id": "beats.schema.json",
   "title": "Beats",
   "type": "object",
-  "required": ["run_id", "scene_id", "beats"],
+  "required": [
+    "run_id",
+    "scene_id",
+    "beats"
+  ],
   "additionalProperties": false,
   "properties": {
-    "run_id": { "type": "string" },
-    "scene_id": { "type": "string" },
+    "run_id": {
+      "type": "string"
+    },
+    "scene_id": {
+      "type": "string"
+    },
     "beats": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["beat_id", "order", "text_excerpt_ref", "visual_description", "est_duration_s", "mood_tags"],
+        "required": [
+          "beat_id",
+          "order",
+          "text_excerpt_ref",
+          "visual_description",
+          "est_duration_s",
+          "mood_tags"
+        ],
         "additionalProperties": false,
         "properties": {
-          "beat_id": { "type": "string" },
-          "order": { "type": "integer", "minimum": 0 },
-          "text_excerpt_ref": { "type": "string", "description": "Character offset range or paragraph ref into the source scene text" },
-          "visual_description": { "type": "string", "description": "Plain-language description of what a camera would see" },
-          "est_duration_s": { "type": "number", "exclusiveMinimum": 0 },
+          "beat_id": {
+            "type": "string"
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "text_excerpt_ref": {
+            "type": "string",
+            "description": "Character offset range or paragraph ref into the source scene text"
+          },
+          "visual_description": {
+            "type": "string",
+            "description": "Plain-language description of what a camera would see"
+          },
+          "est_duration_s": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
           "mood_tags": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "Drawn from config/audio_spec.yaml mood vocabulary"
           },
-          "no_visual_analog": { "type": "boolean", "default": false, "description": "True if this text has no direct filmable equivalent (interior narration etc.)" }
+          "no_visual_analog": {
+            "type": "boolean",
+            "default": false,
+            "description": "True if this text has no direct filmable equivalent (interior narration etc.)"
+          },
+          "search_query": {
+            "type": "string",
+            "description": "Optional agent-written stock-footage search phrase for this beat (2-6 concrete visual keywords, generic imagery not story-specific names). Added 2026-07-23; absent = Stage 03 falls back to mechanical keyword extraction from visual_description."
+          }
         }
       }
     }

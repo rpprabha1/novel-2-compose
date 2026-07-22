@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import importlib.util
 import json
 import sys
@@ -115,6 +117,47 @@ def test_main_bad_mood_tag_needs_input(tmp_path):
 
     assert response.status.value == "NEEDS_INPUT"
     assert response.needs_input[0].reason_code == "mood_tag_outside_vocabulary"
+
+
+def test_main_coerces_partial_invalid_mood_tags(tmp_path):
+    """Out-of-vocabulary tags are dropped mechanically; a beat left empty
+    gets the scene's most common valid tag (2026-07-23 strict-code-over-
+    prompt policy) - the run COMPLETEs instead of blocking on NEEDS_INPUT."""
+    input_dir = tmp_path / "inputs"
+    output_dir = tmp_path / "outputs"
+    _write_scene(input_dir)
+    mixed_json = json.dumps(
+        {
+            "beats": [
+                {
+                    "beat_id": "ch1_sc1_b001",
+                    "order": 0,
+                    "text_excerpt_ref": "para:1",
+                    "visual_description": "A woman climbs a narrow attic staircase.",
+                    "est_duration_s": 3.0,
+                    "mood_tags": ["quiet", "majestic"],
+                    "no_visual_analog": False,
+                },
+                {
+                    "beat_id": "ch1_sc1_b002",
+                    "order": 1,
+                    "text_excerpt_ref": "para:2",
+                    "visual_description": "She kneels and opens an old trunk.",
+                    "est_duration_s": 3.0,
+                    "mood_tags": ["drunk"],
+                    "no_visual_analog": False,
+                },
+            ]
+        }
+    )
+
+    response = run.main(input_dir, output_dir, BASE_RUN_CONFIG, agent_call=lambda s, u: mixed_json)
+
+    assert response.status.value == "COMPLETE"
+    assert "majestic" in response.summary and "drunk" in response.summary
+    beats = json.loads((output_dir / "beats.json").read_text(encoding="utf-8"))["beats"]
+    assert beats[0]["mood_tags"] == ["quiet"]
+    assert beats[1]["mood_tags"] == ["quiet"]  # backfilled with the scene's most common valid tag
 
 
 def test_main_out_of_range_paragraph_ref_needs_input(tmp_path):

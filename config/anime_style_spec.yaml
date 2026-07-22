@@ -21,3 +21,14 @@ device: cpu
 target_width: 960
 stylize_fps: 6
 output_fps: 30
+
+# Real-ESRGAN upscale of the styled frames back to full resolution
+# (2026-07-23, see ARCHITECTURE.md change log): the ncnn-vulkan build runs
+# on this machine's 2GB MX230 GPU (~1.0s/frame batch at 960->1920, measured
+# for real), where PyTorch CUDA could not. Roughly +75-80 min per chapter at
+# stylize_fps 6; disable by setting enabled: false.
+upscale:
+  enabled: true
+  binary_path: shared/tools/realesrgan/realesrgan-ncnn-vulkan.exe
+  model: realesr-animevideov3
+  scale: 2

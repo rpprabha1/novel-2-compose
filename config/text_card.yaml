@@ -19,3 +19,8 @@ max_chars_per_line: 42
 # in 08_timeline_builder once real (much longer) TTS narration is known -
 # caught for real: a beat's narration ran 3-5x its est_duration_s estimate.
 min_duration_s: 20.0
+
+# Second gradient stop (2026-07-23): when set, the card background is a
+# slowly-drifting radial gradient bg_color -> bg_color2 instead of a flat
+# solid - static 20-40s cards read as dead air on the real ch1 output.
+bg_color2: "0x2d1b3d"

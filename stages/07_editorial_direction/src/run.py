@@ -91,6 +91,7 @@ def _build_deterministic_edit_plan(
     hold_max: float,
     max_shots_per_beat: int,
     min_shot_len: float,
+    default_transition: str = "hard-cut",
 ) -> dict:
     """CODE (not agent) edit plan: every verified asset a beat retained
     becomes its own shot, used as-is (in_s=0, whole clip up to its hold) -
@@ -122,7 +123,7 @@ def _build_deterministic_edit_plan(
                 "beat_id": beat_id,
                 "asset_id": usable_assets[0]["asset_id"],
                 "shots": shots,
-                "transition_out": "hard-cut",
+                "transition_out": default_transition,
                 "rationale": "",
             }
         )
@@ -260,8 +261,12 @@ def main(
     else:
         # CODE mode (default, 2026-07-18): every retained verified asset for
         # a beat becomes its own shot, used as-is.
+        default_transition = vocab.get("default_beat_transition", "hard-cut")
+        if default_transition not in vocab["transition_families"]:
+            default_transition = "hard-cut"
         parsed = _build_deterministic_edit_plan(
             workable_beat_ids, beats_by_id, assets_by_beat_id, hold_min, hold_max, max_shots_per_beat, min_shot_len,
+            default_transition=default_transition,
         )
 
     parsed["run_id"] = run_id
@@ -369,12 +374,17 @@ def main(
             )
         )
 
+    # The configured default_beat_transition is exempt: this check guards an
+    # *agent* leaning on the same dramatic transition as a repeated creative
+    # choice - a config-driven mechanical default is not that (2026-07-23,
+    # see ARCHITECTURE.md change log).
+    exempt_transition = vocab.get("default_beat_transition", "hard-cut")
     dup_transitions = []
     for i in range(len(workable_beat_ids) - 1):
         b1, b2 = workable_beat_ids[i], workable_beat_ids[i + 1]
         t1 = plan_by_id[b1].get("transition_out", "hard-cut")
         t2 = plan_by_id[b2].get("transition_out", "hard-cut")
-        if t1 != "hard-cut" and t1 == t2:
+        if t1 != "hard-cut" and t1 == t2 and t1 != exempt_transition:
             dup_transitions.append((b1, b2, t1))
     if dup_transitions:
         hitl_items.append(

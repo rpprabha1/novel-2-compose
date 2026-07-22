@@ -39,7 +39,7 @@ from shared.envelopes import (  # noqa: E402
     StageStatus,
     validate_against_schema,
 )
-from shared.generation import TTSError, synthesize_speech  # noqa: E402
+from shared.generation import TTSError, synthesize_speech, synthesize_speech_kokoro  # noqa: E402
 from shared.manifest import append_manifest_entries  # noqa: E402
 from shared.media import (  # noqa: E402
     FFmpegError,
@@ -89,6 +89,18 @@ def _default_agent_call(system_prompt: str, user_message: str) -> str:
 
 def _default_tts(text: str, dest_path: Path) -> None:
     cfg = yaml.safe_load((REPO_ROOT / "config" / "tts.yaml").read_text(encoding="utf-8"))
+    if cfg.get("engine") == "kokoro":
+        k = cfg["kokoro"]
+        synthesize_speech_kokoro(
+            text=text,
+            dest_path=dest_path,
+            model_path=REPO_ROOT / k["model_path"],
+            voices_path=REPO_ROOT / k["voices_path"],
+            voice=k["voice"],
+            speed=k.get("speed", 1.0),
+            python_launcher=k.get("python_launcher", "py -3.12"),
+        )
+        return
     synthesize_speech(
         text=text,
         dest_path=dest_path,

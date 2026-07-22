@@ -62,3 +62,29 @@ mood_vocabulary:
   - social
   - wise
   - cynical
+
+# Pipeline mood tag -> Jamendo folksonomy tags (2026-07-23, added with the
+# JamendoMusicSource - see ARCHITECTURE.md change log). Jamendo's fuzzytags
+# matches against its own community tag vocabulary; our mood words mostly
+# aren't in it (verified live: unmapped queries silently fall back to overall
+# popularity, returning identical results regardless of mood). Data mapping
+# per the genre-agnostic hard rule - never branched on in code.
+jamendo_tag_map:
+  tense: "dark suspense"
+  quiet: "calm ambient"
+  ominous: "dark drone"
+  sparse: "ambient minimal"
+  triumphant: "epic orchestral"
+  somber: "sad melancholic"
+  playful: "happy upbeat"
+  romantic: "romantic emotional"
+  urgent: "energetic dramatic"
+  angry: "aggressive intense"
+  calm: "calm peaceful"
+  curious: "mysterious light"
+  omniscient: "ambient cinematic"
+  protective: "warm emotional"
+  sad: "sad piano"
+  social: "upbeat folk"
+  wise: "emotional cinematic"
+  cynical: "dark quirky"

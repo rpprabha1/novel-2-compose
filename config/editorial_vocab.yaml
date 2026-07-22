@@ -43,3 +43,13 @@ pacing_presets:
 # Subdividing one asset into more than this many shots is always a HITL
 # trigger (CLAUDE.md section 4), independent of pacing preset.
 hitl_shot_subdivision_threshold: 3
+
+# Transition the deterministic (CODE-default) edit plan places at every beat
+# boundary. Added 2026-07-23 (see ARCHITECTURE.md change log): author found
+# uniform hard-cuts visually flat on the real chapter-1 output; a gentle
+# crossfade at beat boundaries reads far better for narrated prose. Must be
+# one of transition_families. The repeated_dramatic_transition HITL check
+# exempts this configured default - that check guards an *agent* leaning on
+# the same dramatic transition as a repeated creative choice, which a
+# config-driven mechanical default is not.
+default_beat_transition: crossfade

@@ -232,15 +232,32 @@ def main(
             ["Retry generation", "Review scene text manually"],
         )
 
-    bad_tags = sorted({tag for beat in beats for tag in beat.get("mood_tags", [])} - MOOD_VOCABULARY)
-    if bad_tags:
+    # Mechanical out-of-vocabulary tag handling (2026-07-23, see DECISIONS_LOG
+    # and ARCHITECTURE.md change log): after 4 real recurrences of the model
+    # inventing tags despite two vocabulary expansions and a hardened prompt
+    # (1 word, then 1, then 1, then 11 once search_query was added), the
+    # author's standing direction is strict code-level enforcement over
+    # further prompt whack-a-mole. Invalid tags are dropped (they only steer
+    # music search - noise words carry no signal worth blocking a 20-minute
+    # regeneration over); a beat left with zero valid tags gets the scene's
+    # most common valid tag (a mechanical statistic, not a judgment call).
+    # NEEDS_INPUT now fires only in the degenerate all-invalid case, where
+    # there is genuinely nothing mechanical left to salvage.
+    all_valid = [tag for beat in beats for tag in beat.get("mood_tags", []) if tag in MOOD_VOCABULARY]
+    dropped_tags = sorted({tag for beat in beats for tag in beat.get("mood_tags", [])} - MOOD_VOCABULARY)
+    if not all_valid:
         return _needs_input(
             run_id,
             "mood_tag_outside_vocabulary",
-            f"The model used mood tags outside the configured vocabulary: {bad_tags}. "
+            f"Every mood tag the model produced is outside the configured vocabulary: {dropped_tags}. "
             "Re-run, or manually correct the tags?",
             ["Retry generation", "Manually correct tags"],
         )
+    if dropped_tags:
+        most_common_valid = max(set(all_valid), key=all_valid.count)
+        for beat in beats:
+            kept = [tag for tag in beat.get("mood_tags", []) if tag in MOOD_VOCABULARY]
+            beat["mood_tags"] = kept or [most_common_valid]
 
     # Real failure mode observed for real (2026-07-22, see DECISIONS_LOG.md):
     # the model fabricated a trailing beat referencing a paragraph number past
@@ -307,6 +324,8 @@ def main(
     under_segmented = len(beats) < 3 and len(scene_text.split()) > 150
 
     summary = f"Extracted {len(beats)} beat(s) from scene {scene_id} ({no_visual_count} with no visual analog)."
+    if dropped_tags:
+        summary += f" Dropped {len(dropped_tags)} out-of-vocabulary mood tag(s): {dropped_tags}."
     if beats_merged_count:
         summary += f" Merged {beats_merged_count} duplicate-visual beat(s) into their neighbors."
     if long_beats:
