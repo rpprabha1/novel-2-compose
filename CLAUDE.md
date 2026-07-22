@@ -48,6 +48,7 @@ An agentic pipeline that takes a chapter/scene from the author's own novel — *
 | 11_assembly_render | **CODE** | ffmpeg trim/concat/grade/mux from `timeline.json` + `audio_mix.json`. Fully deterministic. |
 | 12_qa_attribution | **CODE** | Schema validation, license/attribution completeness, duration checks, loudness spec check. |
 | 13_pixel_art_conversion | **CODE** | Added 2026-07-18 (see `ARCHITECTURE.md` change log): restyles the approved `final.mp4` into a retro pixel-art look (nearest-neighbor downscale/upscale + dithered palette reduction, all ffmpeg). The creative call (which of 3 sampled techniques to use) was already made by the human reviewing real samples before this stage was built — nothing left here is judgment-shaped. Produces `final_pixel_art.mp4` alongside, never replacing, `final.mp4`. |
+| 14_anime_style_conversion | **CODE** | Added 2026-07-23 (see `ARCHITECTURE.md` change log): restyles the approved `final.mp4` via AnimeGANv2 (a pretrained GAN, MIT-licensed, vendored under `shared/models/animegan/`), frame-by-frame at a reduced `stylize_fps` then held back up to full `output_fps` (CPU-only inference is too slow at native frame rate — a real feasibility constraint, not a shortcut, and one this pipeline's mostly-static content tolerates well). The creative calls (which of 4 sampled checkpoints to use; whether to apply it uniformly despite known text-card legibility loss) were already made by the human reviewing real samples/tradeoffs before this stage was built — nothing left here is judgment-shaped. Produces `final_anime.mp4` alongside, never replacing, `final.mp4`/`final_pixel_art.mp4`. |
 
 If a step is not in this table, classify it before building it and log the classification.
 
@@ -89,7 +90,8 @@ novel-to-video/
     ├── 10_human_review_gate/
     ├── 11_assembly_render/
     ├── 12_qa_attribution/
-    └── 13_pixel_art_conversion/
+    ├── 13_pixel_art_conversion/
+    └── 14_anime_style_conversion/
 ```
 
 Each stage folder: `README.md` (purpose, I/O, run/test instructions, numeric pass criterion, review checklist), `AGENT_PROMPT.md` (agent/hybrid stages only), `src/` with single `run.py` entrypoint, `tests/` (synthetic fixtures only), gitignored `inputs/` and `outputs/`.

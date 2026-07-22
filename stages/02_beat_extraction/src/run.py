@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 import jsonschema
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
@@ -38,17 +39,15 @@ from shared.envelopes import (  # noqa: E402
 
 STAGE_NAME = "02_beat_extraction"
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "AGENT_PROMPT.md"
-MOOD_VOCABULARY = {
-    "tense",
-    "quiet",
-    "ominous",
-    "sparse",
-    "triumphant",
-    "somber",
-    "playful",
-    "romantic",
-    "urgent",
-}
+AUDIO_SPEC_PATH = REPO_ROOT / "config" / "audio_spec.yaml"
+
+
+def _load_mood_vocabulary() -> set[str]:
+    spec = yaml.safe_load(AUDIO_SPEC_PATH.read_text(encoding="utf-8"))
+    return set(spec["mood_vocabulary"])
+
+
+MOOD_VOCABULARY = _load_mood_vocabulary()
 # Sections 1-6 and 9 are instructions the model needs to act on. Sections
 # 7/8/10/11/12 are Coordinator/human-facing process documentation (NEEDS_INPUT
 # reason codes, HITL triggers, failure modes, non-goals, definition of done) -
@@ -114,6 +113,51 @@ def _strip_wrapper(raw_text: str) -> str:
     return text
 
 
+def _normalize_for_dedup(text: str) -> str:
+    return re.sub(r"\s+", " ", text.strip().lower())
+
+
+def _merge_duplicate_visual_beats(beats: list[dict]) -> list[dict]:
+    """Mechanical, deterministic post-process - CLAUDE.md rule 4 classifies
+    this CODE, not agent judgment, and for good reason: the model has
+    repeatedly produced multiple *consecutive* beats with an identical (or
+    near-identical) `visual_description` for real (observed: 3 consecutive
+    "Beasts of England" song beats, word-for-word identical text), which
+    renders as the same static fallback card shown back-to-back for tens of
+    seconds. Prompt instructions alone have not reliably prevented this
+    across several real attempts, so this is enforced here instead of only
+    asked for - merge adjacent beats whose `visual_description` normalizes
+    (whitespace/case) to the same string. This can never lose real
+    information: if two adjacent beats' visuals are truly identical, there
+    was nothing distinguishing them to begin with, and merging just
+    reflects that honestly instead of splitting one moment into duplicates.
+    """
+    if not beats:
+        return beats
+    ordered = sorted(beats, key=lambda b: b["order"])
+    merged: list[dict] = [dict(ordered[0])]
+    for beat in ordered[1:]:
+        prev = merged[-1]
+        if _normalize_for_dedup(beat.get("visual_description", "")) == _normalize_for_dedup(prev.get("visual_description", "")):
+            prev_ref = re.match(r"para:(\d+)(?:-(\d+))?$", prev.get("text_excerpt_ref", ""))
+            cur_ref = re.match(r"para:(\d+)(?:-(\d+))?$", beat.get("text_excerpt_ref", ""))
+            if prev_ref and cur_ref:
+                start = int(prev_ref.group(1))
+                end = int(cur_ref.group(2) or cur_ref.group(1))
+                prev["text_excerpt_ref"] = f"para:{start}-{end}" if end != start else f"para:{start}"
+            prev["est_duration_s"] = round(prev.get("est_duration_s", 0) + beat.get("est_duration_s", 0), 4)
+            prev["mood_tags"] = sorted(set(prev.get("mood_tags", [])) | set(beat.get("mood_tags", [])))
+            prev["no_visual_analog"] = bool(prev.get("no_visual_analog")) and bool(beat.get("no_visual_analog"))
+        else:
+            merged.append(dict(beat))
+
+    prefix = ordered[0]["beat_id"].rsplit("_b", 1)[0]
+    for i, beat in enumerate(merged):
+        beat["order"] = i
+        beat["beat_id"] = f"{prefix}_b{i + 1:03d}"
+    return merged
+
+
 def _needs_input(run_id: str, reason_code: str, question: str, options: list[str]) -> StageResponse:
     return StageResponse(
         envelope_id="",
@@ -146,6 +190,7 @@ def main(
 
     scene_id = scene_file.stem
     scene_text = scene_file.read_text(encoding="utf-8")
+    num_paragraphs = len([p for p in scene_text.strip().split("\n\n") if p.strip()])
     system_prompt = _render_system_prompt(PROMPT_PATH.read_text(encoding="utf-8"))
     user_message = _build_user_message(scene_id, scene_text, run_config)
 
@@ -197,6 +242,43 @@ def main(
             ["Retry generation", "Manually correct tags"],
         )
 
+    # Real failure mode observed for real (2026-07-22, see DECISIONS_LOG.md):
+    # the model fabricated a trailing beat referencing a paragraph number past
+    # the real scene's actual paragraph count, with an empty visual_description
+    # and no_visual_analog=true - i.e. inventing a beat with no textual basis
+    # at all rather than grounding every beat in real content (Forbidden
+    # Assumption #2). Schema validation alone doesn't catch either problem
+    # (an out-of-range para number is still a syntactically valid string; an
+    # empty visual_description is still a valid string), so both are checked
+    # here explicitly.
+    grounding_errors: list[str] = []
+    for beat in beats:
+        if not (beat.get("visual_description") or "").strip():
+            grounding_errors.append(f"{beat.get('beat_id')}: empty visual_description")
+            continue
+        ref = beat.get("text_excerpt_ref", "")
+        m = re.match(r"para:(\d+)(?:-(\d+))?$", ref)
+        if not m:
+            grounding_errors.append(f"{beat.get('beat_id')}: text_excerpt_ref {ref!r} isn't a valid 'para:N' reference")
+            continue
+        start, end = int(m.group(1)), int(m.group(2) or m.group(1))
+        if start < 1 or end > num_paragraphs or start > end:
+            grounding_errors.append(
+                f"{beat.get('beat_id')}: text_excerpt_ref {ref!r} is outside this scene's real paragraph range (1-{num_paragraphs})"
+            )
+    if grounding_errors:
+        return _needs_input(
+            run_id,
+            "invalid_beat_grounding",
+            f"{len(grounding_errors)} beat(s) aren't grounded in real scene content: {grounding_errors}. Retry?",
+            ["Retry generation", "Manually correct or drop the affected beat(s)"],
+        )
+
+    beats_before_merge = len(beats)
+    beats = _merge_duplicate_visual_beats(beats)
+    parsed["beats"] = beats
+    beats_merged_count = beats_before_merge - len(beats)
+
     no_visual_count = sum(1 for b in beats if b.get("no_visual_analog"))
     if no_visual_count > len(beats) / 2:
         return _needs_input(
@@ -225,6 +307,8 @@ def main(
     under_segmented = len(beats) < 3 and len(scene_text.split()) > 150
 
     summary = f"Extracted {len(beats)} beat(s) from scene {scene_id} ({no_visual_count} with no visual analog)."
+    if beats_merged_count:
+        summary += f" Merged {beats_merged_count} duplicate-visual beat(s) into their neighbors."
     if long_beats:
         summary += f" HITL: {len(long_beats)} beat(s) over 15s."
     if under_segmented:

@@ -24,10 +24,25 @@ tone_music_tags:
     - quiet
     - ominous
     - sparse
+  # Added 2026-07-21 for the Animal Farm run - see DECISIONS_LOG.md.
+  political-allegory:
+    - tense
+    - urgent
+    - somber
+    - triumphant
+    - wise
+    - cynical
 
 # mood tags available to 02_beat_extraction for beat-level tagging; the
 # audio agent draws cue mood tags from the union of beat mood_tags and this
 # tone's allowed list above.
+# Expanded 2026-07-21 (angry/calm/curious/omniscient/protective/sad/social/wise
+# added): the original 9-word list was tuned against a physical-action fixture
+# scene and was too narrow for a moral/philosophical speech (Animal Farm ch1's
+# Major's speech) - real run hit mood_tag_outside_vocabulary for real, human
+# decided to expand rather than retry or hand-correct - see DECISIONS_LOG.md.
+# `cynical` added same day, same run, same human decision applied a second
+# time (satirical/political tone genuinely needs it) - see DECISIONS_LOG.md.
 mood_vocabulary:
   - tense
   - quiet
@@ -38,3 +53,12 @@ mood_vocabulary:
   - playful
   - romantic
   - urgent
+  - angry
+  - calm
+  - curious
+  - omniscient
+  - protective
+  - sad
+  - social
+  - wise
+  - cynical

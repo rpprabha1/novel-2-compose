@@ -1,0 +1,23 @@
+# anime_style_spec.yaml — style parameters for 14_anime_style_conversion's
+# AnimeGANv2 pass over the QA-approved final.mp4.
+#
+# checkpoint/target_width chosen by the human after reviewing 4 real ~18s
+# samples (celeba_distill, face_paint_512_v1, face_paint_512_v2, paprika)
+# rendered from the real ch1_sc1 final.mp4 at this exact width - see
+# ARCHITECTURE.md change log. Applied uniformly (including text-card beats,
+# where it's known to blur legibility) per explicit human decision.
+
+checkpoint: paprika
+device: cpu
+
+# Real footage clip and text-card beats alike are mostly static (slow Ken
+# Burns holds, or fully static cards) - almost no per-frame visual change at
+# 30fps. Neural inference measured at ~2-3s/frame (960px width, this CPU-only
+# machine, full extract/style/reassemble pipeline, not just raw model
+# compute) makes a full chapter at 30fps take many hours; stylizing at a
+# reduced rate and holding each styled frame for several output frames looks
+# effectively identical for this content and is standard practice in real
+# limited-animation production, not just an expedient shortcut here.
+target_width: 960
+stylize_fps: 6
+output_fps: 30

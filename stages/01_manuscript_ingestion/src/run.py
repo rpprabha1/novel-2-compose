@@ -34,6 +34,47 @@ def _extract_chapter_number(heading: str, fallback: int) -> int:
     return int(m.group(1)) if m else fallback
 
 
+_SENTENCE_END = re.compile(
+    r'(?<=[.!?])(?<!Mr\.)(?<!Mrs\.)(?<!Ms\.)(?<!Dr\.)(?<!St\.)(?<!Jr\.)(?<!Sr\.)(?<!Prof\.)\s+(?=[“"]?[A-Z])'
+)
+
+
+def reflow_paragraphs(body: str) -> str:
+    """Reconstructs real paragraph breaks for manuscript sources that lose
+    them entirely (some plain-text conversions hard-wrap every sentence
+    fragment onto its own line, with tabs standing in for spaces and zero
+    blank lines anywhere - a real defect found in this run's source file,
+    not a hypothetical). Purely mechanical/generic (no manuscript-specific
+    content, CLAUDE.md rule 11): normalizes whitespace, splits on sentence
+    boundaries (guarding common title abbreviations), then groups sentences
+    into paragraphs - a new paragraph opens at a dialogue quote, otherwise
+    caps at 4 sentences. This doesn't reproduce the original book's exact
+    typesetting, but restores real, distinct text chunks so `text_excerpt_ref`
+    (Stage 02) and narration extraction (Stage 09) can both ground against
+    the same real paragraphs instead of a single undifferentiated blob - see
+    DECISIONS_LOG.md.
+    """
+    flat = re.sub(r"\s+", " ", body.replace("\t", " ")).strip()
+    if not flat:
+        return ""
+    sentences = [s.strip() for s in _SENTENCE_END.split(flat) if s.strip()]
+    paragraphs: list[str] = []
+    current: list[str] = []
+    for sentence in sentences:
+        starts_dialogue = sentence.startswith('"') or sentence.startswith("“")
+        if current and starts_dialogue:
+            paragraphs.append(" ".join(current))
+            current = [sentence]
+        else:
+            current.append(sentence)
+            if len(current) >= 4:
+                paragraphs.append(" ".join(current))
+                current = []
+    if current:
+        paragraphs.append(" ".join(current))
+    return "\n\n".join(paragraphs)
+
+
 def split_manuscript(text: str, chapter_marker: str, scene_marker: str) -> list[dict]:
     """Pure function: raw manuscript text -> ordered list of scene dicts.
 
@@ -140,7 +181,12 @@ def main(input_dir: Path, output_dir: Path, run_config: dict) -> StageResponse:
     for order, scene in enumerate(raw_scenes):
         scene_id = f"ch{scene['chapter_number']}_sc{scene['scene_number_in_chapter']}"
         file_name = f"{scene_id}.txt"
-        (output_dir / file_name).write_text(scene["body"] + "\n", encoding="utf-8")
+        body = scene["body"]
+        # Only reflow if the source genuinely has no paragraph breaks at all -
+        # leaves already-well-formed manuscripts (e.g. the fixture) untouched.
+        if "\n\n" not in body and body.strip():
+            body = reflow_paragraphs(body)
+        (output_dir / file_name).write_text(body + "\n", encoding="utf-8")
         entry = {
             "scene_id": scene_id,
             "order": order,

@@ -54,3 +54,9 @@ pixel_art:
   # 13_pixel_art_conversion only re-filters existing frames (no cuts/re-timing),
   # so output duration should match the source almost exactly.
   duration_tolerance_pct: 1
+
+anime_style:
+  # 14_anime_style_conversion re-times through a reduced-then-restored frame
+  # rate (see anime_style_spec.yaml) rather than a straight 1:1 re-filter, so
+  # allow a little more drift than pixel_art's re-filter-only tolerance.
+  duration_tolerance_pct: 2

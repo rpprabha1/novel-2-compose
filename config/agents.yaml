@@ -11,17 +11,27 @@ backend: ollama
 ollama:
   host: http://localhost:11434
   default_model: llama3.2:1b
-  timeout_s: 480
+  # Bumped from 480 (2026-07-21): the first real 02_beat_extraction call
+  # against a full manuscript chapter (Animal Farm ch1, ~2,700 words, 16384
+  # num_ctx) genuinely timed out at 480s mid-generation on this CPU-only
+  # machine - confirmed via real ollama read-timeout, not speculative - see
+  # DECISIONS_LOG.md.
+  timeout_s: 1800
   # Ollama's structured-output mode: forces the model to emit valid JSON
   # matching this pipeline's schemas rather than free text.
   format: json
   options:
     temperature: 0.2
-    num_ctx: 4096
+    # Bumped from 4096 (2026-07-21): the fixture scene this default was tuned
+    # against was ~300-500 words; a real manuscript chapter (e.g. Animal Farm
+    # ch1, ~2,700 words) plus AGENT_PROMPT.md's included sections and the
+    # model's own JSON beat-list output overruns 4096 tokens well before
+    # generation completes - see DECISIONS_LOG.md.
+    num_ctx: 16384
 
 # Per-stage override. Falls back to ollama.default_model if a stage isn't listed.
 stage_models:
-  02_beat_extraction: llama3.2:1b
+  02_beat_extraction: llama3.2:3b  # bumped from 1b (2026-07-21): 1b failed this stage's real run for real (dialogue-heavy beats - Major's speech, the revolutionary song - came back with the raw quoted text copy-pasted as visual_description instead of an actual visual interpretation); also brings config in line with this stage's own README, which was authored/tested against 3b already - see DECISIONS_LOG.md
   06_fallback_generation: llama3.2:3b  # bumped from 1b (2026-07-17): 1b failed this stage's structured prompt+rationale generation twice for real - see DECISIONS_LOG.md
   07_editorial_direction: llama3.2:3b  # bumped from 1b (2026-07-18): 1b failed this stage's multi-beat/multi-asset structured plan twice for real (hallucinated/cross-contaminated asset_id, repeated out-of-range hold_duration_s) - see DECISIONS_LOG.md
   09_audio_production: llama3.2:3b  # bumped from 1b (2026-07-18): 1b failed this stage's cue-sheet generation twice for real (overlapping cue boundaries, invalid mood tag) - see DECISIONS_LOG.md

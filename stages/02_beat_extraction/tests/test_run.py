@@ -117,6 +117,67 @@ def test_main_bad_mood_tag_needs_input(tmp_path):
     assert response.needs_input[0].reason_code == "mood_tag_outside_vocabulary"
 
 
+def test_main_out_of_range_paragraph_ref_needs_input(tmp_path):
+    input_dir = tmp_path / "inputs"
+    output_dir = tmp_path / "outputs"
+    _write_scene(input_dir)
+    invented_trailing_beat_json = json.dumps(
+        {
+            "beats": [
+                {
+                    "beat_id": "ch1_sc1_b001",
+                    "order": 0,
+                    "text_excerpt_ref": "para:1",
+                    "visual_description": "desc",
+                    "est_duration_s": 3.0,
+                    "mood_tags": ["quiet"],
+                    "no_visual_analog": False,
+                },
+                {
+                    "beat_id": "ch1_sc1_b002",
+                    "order": 1,
+                    "text_excerpt_ref": "para:3",
+                    "visual_description": "desc",
+                    "est_duration_s": 3.0,
+                    "mood_tags": ["quiet"],
+                    "no_visual_analog": False,
+                },
+            ]
+        }
+    )
+
+    response = run.main(input_dir, output_dir, BASE_RUN_CONFIG, agent_call=lambda s, u: invented_trailing_beat_json)
+
+    assert response.status.value == "NEEDS_INPUT"
+    assert response.needs_input[0].reason_code == "invalid_beat_grounding"
+
+
+def test_main_empty_visual_description_needs_input(tmp_path):
+    input_dir = tmp_path / "inputs"
+    output_dir = tmp_path / "outputs"
+    _write_scene(input_dir)
+    empty_desc_json = json.dumps(
+        {
+            "beats": [
+                {
+                    "beat_id": "ch1_sc1_b001",
+                    "order": 0,
+                    "text_excerpt_ref": "para:1",
+                    "visual_description": "",
+                    "est_duration_s": 3.0,
+                    "mood_tags": ["quiet"],
+                    "no_visual_analog": True,
+                }
+            ]
+        }
+    )
+
+    response = run.main(input_dir, output_dir, BASE_RUN_CONFIG, agent_call=lambda s, u: empty_desc_json)
+
+    assert response.status.value == "NEEDS_INPUT"
+    assert response.needs_input[0].reason_code == "invalid_beat_grounding"
+
+
 def test_main_majority_no_visual_analog_needs_input(tmp_path):
     input_dir = tmp_path / "inputs"
     output_dir = tmp_path / "outputs"
@@ -128,7 +189,7 @@ def test_main_majority_no_visual_analog_needs_input(tmp_path):
                     "beat_id": "ch1_sc1_b001",
                     "order": 0,
                     "text_excerpt_ref": "para:1",
-                    "visual_description": "desc",
+                    "visual_description": "No direct visual - interior reflection on the day's events.",
                     "est_duration_s": 3.0,
                     "mood_tags": ["quiet"],
                     "no_visual_analog": True,
@@ -137,7 +198,7 @@ def test_main_majority_no_visual_analog_needs_input(tmp_path):
                     "beat_id": "ch1_sc1_b002",
                     "order": 1,
                     "text_excerpt_ref": "para:2",
-                    "visual_description": "desc",
+                    "visual_description": "No direct visual - a memory of childhood surfaces unbidden.",
                     "est_duration_s": 3.0,
                     "mood_tags": ["quiet"],
                     "no_visual_analog": True,
@@ -145,8 +206,8 @@ def test_main_majority_no_visual_analog_needs_input(tmp_path):
                 {
                     "beat_id": "ch1_sc1_b003",
                     "order": 2,
-                    "text_excerpt_ref": "para:3",
-                    "visual_description": "desc",
+                    "text_excerpt_ref": "para:2",
+                    "visual_description": "She sets down the cup and looks toward the window.",
                     "est_duration_s": 3.0,
                     "mood_tags": ["quiet"],
                     "no_visual_analog": False,
@@ -159,6 +220,72 @@ def test_main_majority_no_visual_analog_needs_input(tmp_path):
 
     assert response.status.value == "NEEDS_INPUT"
     assert response.needs_input[0].reason_code == "majority_no_visual_analog"
+
+
+def test_main_merges_adjacent_duplicate_visual_beats(tmp_path):
+    input_dir = tmp_path / "inputs"
+    output_dir = tmp_path / "outputs"
+    four_para_text = (
+        "A crowd gathers in the square, murmuring.\n\n"
+        "The choir begins to sing the old anthem together.\n\n"
+        "The choir keeps singing the old anthem together.\n\n"
+        "The crowd disperses into the evening streets."
+    )
+    _write_scene(input_dir, text=four_para_text)
+    duplicate_visual_json = json.dumps(
+        {
+            "beats": [
+                {
+                    "beat_id": "ch1_sc1_b001",
+                    "order": 0,
+                    "text_excerpt_ref": "para:1",
+                    "visual_description": "A crowd gathers in a square, murmuring among themselves.",
+                    "est_duration_s": 3.0,
+                    "mood_tags": ["quiet"],
+                    "no_visual_analog": False,
+                },
+                {
+                    "beat_id": "ch1_sc1_b002",
+                    "order": 1,
+                    "text_excerpt_ref": "para:2",
+                    "visual_description": "The choir sings together in the square.",
+                    "est_duration_s": 4.0,
+                    "mood_tags": ["triumphant"],
+                    "no_visual_analog": False,
+                },
+                {
+                    "beat_id": "ch1_sc1_b003",
+                    "order": 2,
+                    "text_excerpt_ref": "para:3",
+                    "visual_description": "The choir sings together in the square.",
+                    "est_duration_s": 4.0,
+                    "mood_tags": ["playful"],
+                    "no_visual_analog": False,
+                },
+                {
+                    "beat_id": "ch1_sc1_b004",
+                    "order": 3,
+                    "text_excerpt_ref": "para:4",
+                    "visual_description": "The crowd disperses down the evening streets.",
+                    "est_duration_s": 3.0,
+                    "mood_tags": ["quiet"],
+                    "no_visual_analog": False,
+                },
+            ]
+        }
+    )
+
+    response = run.main(input_dir, output_dir, BASE_RUN_CONFIG, agent_call=lambda s, u: duplicate_visual_json)
+
+    assert response.status.value == "COMPLETE"
+    beats = json.loads((output_dir / "beats.json").read_text(encoding="utf-8"))["beats"]
+    assert len(beats) == 3
+    merged = beats[1]
+    assert merged["text_excerpt_ref"] == "para:2-3"
+    assert merged["est_duration_s"] == 8.0
+    assert set(merged["mood_tags"]) == {"triumphant", "playful"}
+    assert [b["beat_id"] for b in beats] == ["ch1_sc1_b001", "ch1_sc1_b002", "ch1_sc1_b003"]
+    assert [b["order"] for b in beats] == [0, 1, 2]
 
 
 def test_main_missing_scene_file_fails(tmp_path):
