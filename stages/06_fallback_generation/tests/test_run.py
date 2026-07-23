@@ -187,17 +187,18 @@ def test_render_failure_fails(tmp_path):
     assert response.status.value == "FAILED"
 
 
-def _noop_text_card_renderer(text: str, duration_s: float, dest_path: Path) -> None:
+def _noop_mood_visual_renderer(mood_tags: list, duration_s: float, dest_path: Path) -> None:
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     dest_path.write_bytes(b"fake mp4")
 
 
-def test_default_code_mode_generates_text_card_assets(tmp_path):
-    # 2026-07-18: main() defaults to the lightweight ffmpeg text-card path
-    # (CODE) when agent_call is omitted, not the real Ollama+sd-turbo
-    # backend - sd-turbo proved too memory-heavy for a constrained dev
-    # machine, and once diffusion is skipped an LLM-authored prompt has
-    # nothing to render anyway. See DECISIONS_LOG.md / ARCHITECTURE.md.
+def test_default_code_mode_generates_mood_visual_assets(tmp_path):
+    # 2026-07-18: main() defaults to a lightweight ffmpeg visual (CODE) when
+    # agent_call is omitted, not the real Ollama+sd-turbo backend - sd-turbo
+    # proved too memory-heavy for a constrained dev machine. That default
+    # was itself changed 2026-07-23 (see ARCHITECTURE.md change log) from an
+    # on-screen text card to a mood-colored gradient with no text, since
+    # 09_audio_production's TTS already speaks the same text aloud.
     run_id = "test_run_06"
     _clean_run_dir(run_id)
     input_dir, output_dir = tmp_path / "in", tmp_path / "out"
@@ -205,24 +206,24 @@ def test_default_code_mode_generates_text_card_assets(tmp_path):
     _write(input_dir, beats, candidates)
     calls = []
 
-    def recording_text_card_renderer(text, duration_s, dest_path):
-        calls.append((text, duration_s))
-        _noop_text_card_renderer(text, duration_s, dest_path)
+    def recording_mood_visual_renderer(mood_tags, duration_s, dest_path):
+        calls.append((mood_tags, duration_s))
+        _noop_mood_visual_renderer(mood_tags, duration_s, dest_path)
 
-    response = run.main(input_dir, output_dir, RUN_CONFIG, text_card_renderer=recording_text_card_renderer)
+    response = run.main(input_dir, output_dir, RUN_CONFIG, mood_visual_renderer=recording_mood_visual_renderer)
 
     assert response.status.value == "COMPLETE"
     out = json.loads((output_dir / "assets_manifest.json").read_text(encoding="utf-8"))
     assert out["assets"][0]["beat_id"] == "b1"
     assert out["assets"][0]["origin"] == "generated_fallback"
-    assert "text card" in out["assets"][0]["license"]
+    assert "mood visual" in out["assets"][0]["license"]
     assert not (output_dir / "fallback_prompt.json").exists()  # no agent output in CODE mode
-    # rendered from the beat's own visual_description, not an LLM prompt.
-    # Duration is padded to config/text_card.yaml's min_duration_s (20.0),
-    # not the beat's raw est_duration_s (4.0) - a text card has no natural
-    # length ceiling like real footage, and est_duration_s badly
+    # driven by the beat's own mood_tags, not an LLM prompt or on-screen text.
+    # Duration is padded to config/fallback_visual.yaml's min_duration_s
+    # (20.0), not the beat's raw est_duration_s (4.0) - a generated visual has
+    # no natural length ceiling like real footage, and est_duration_s badly
     # underestimates real TTS narration length (see ARCHITECTURE.md).
-    assert calls == [("a woman kneeling beside an open trunk", 20.0)]
+    assert calls == [(["quiet", "tense"], 20.0)]
     assert out["assets"][0]["duration_s"] == 20.0
 
     _clean_run_dir(run_id)
@@ -263,10 +264,10 @@ def test_code_mode_render_failure_fails(tmp_path):
     beats, candidates = _make_inputs({"b1": "06_fallback_generation"})
     _write(input_dir, beats, candidates)
 
-    def _failing_text_card_renderer(text, duration_s, dest_path):
-        raise FFmpegError("simulated text card failure")
+    def _failing_mood_visual_renderer(mood_tags, duration_s, dest_path):
+        raise FFmpegError("simulated mood visual failure")
 
-    response = run.main(input_dir, output_dir, RUN_CONFIG, text_card_renderer=_failing_text_card_renderer)
+    response = run.main(input_dir, output_dir, RUN_CONFIG, mood_visual_renderer=_failing_mood_visual_renderer)
 
     assert response.status.value == "FAILED"
 

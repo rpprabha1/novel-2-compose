@@ -24,33 +24,9 @@ sys.path.insert(0, str(REPO_ROOT))
 from shared.envelopes import ErrorInfo, NeedsInputItem, StageResponse, StageStatus, validate_against_schema  # noqa: E402
 from shared.manifest import append_manifest_entries  # noqa: E402
 from shared.sources import ArchiveOrgSource, FootageSource, PexelsSource, PixabaySource, WikimediaCommonsSource  # noqa: E402
+from shared.text import extract_search_terms  # noqa: E402
 
 STAGE_NAME = "03_candidate_fetch"
-
-_STOPWORDS = {
-    "a", "an", "the", "and", "or", "but", "of", "in", "on", "at", "to", "from",
-    "with", "her", "his", "she", "he", "it", "its", "their", "they", "is",
-    "are", "was", "were", "as", "into", "onto", "toward", "towards", "behind",
-    "beside", "under", "over", "through", "across", "down", "up", "out",
-    "for", "that", "this", "these", "those", "who", "which", "one", "only",
-    "them", "there", "than", "then", "so", "if", "be", "been", "being",
-}
-
-
-def extract_search_terms(visual_description: str, max_terms: int = 8) -> str:
-    """Mechanical (non-agent) keyword extraction: lowercase, drop stopwords and
-    short words, de-duplicate, keep the first max_terms in reading order."""
-    words = re.findall(r"[A-Za-z']+", visual_description.lower())
-    seen: set[str] = set()
-    terms: list[str] = []
-    for w in words:
-        if w in _STOPWORDS or len(w) <= 2 or w in seen:
-            continue
-        seen.add(w)
-        terms.append(w)
-        if len(terms) >= max_terms:
-            break
-    return " ".join(terms)
 
 
 def _load_env_file(path: Path) -> dict[str, str]:

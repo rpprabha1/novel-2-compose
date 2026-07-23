@@ -3,14 +3,16 @@
 Originally HYBRID (agent writes an image-generation prompt from beat data,
 code renders it via sd-turbo diffusion + Ken Burns zoompan). Reclassified to
 CODE by default 2026-07-18 (see ARCHITECTURE.md change log): sd-turbo
-repeatedly exhausted RAM/disk loading on a constrained dev machine, and once
-diffusion is skipped the agent-authored prompt has nothing left to render
-anyway (it's styled for a diffusion model, not for on-screen text). Default
-path is now a plain ffmpeg text card - wrapped text (the beat's own
-visual_description, no LLM involved) over a solid background - which has no
-model-loading risk at all. AGENT+diffusion mode remains fully implemented
-and available by passing an explicit agent_call. Only processes beats
-Stage 04 routed here (routing.route == "06_fallback_generation").
+repeatedly exhausted RAM/disk loading on a constrained dev machine. Default
+path was originally a plain ffmpeg text card (the beat's own
+visual_description rendered as on-screen text); changed 2026-07-23 (see
+ARCHITECTURE.md change log) to a Ken-Burns-animated mood-colored gradient
+with no text at all, since 09_audio_production's TTS already speaks that
+same text aloud - showing it again on screen was redundant and read as a
+broken slideshow. Both variants have no model-loading risk. AGENT+diffusion
+mode remains fully implemented and available by passing an explicit
+agent_call. Only processes beats Stage 04 routed here
+(routing.route == "06_fallback_generation").
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ from shared.agents import AgentBackendError, call_ollama, load_agent_config, res
 from shared.envelopes import ErrorInfo, NeedsInputItem, StageResponse, StageStatus, validate_against_schema  # noqa: E402
 from shared.generation import generate_image  # noqa: E402
 from shared.manifest import append_manifest_entries  # noqa: E402
-from shared.media import FFmpegError, generate_text_card, ken_burns_zoompan  # noqa: E402
+from shared.media import FFmpegError, generate_mood_visual, ken_burns_zoompan  # noqa: E402
 
 STAGE_NAME = "06_fallback_generation"
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "AGENT_PROMPT.md"
@@ -40,7 +42,7 @@ _INCLUDED_SECTION_NUMBERS = {"1", "2", "3", "4", "5", "6", "9"}
 AgentCallFn = Callable[[str, str], str]
 ImageGeneratorFn = Callable[[str, str, Path], None]
 ZoompanFn = Callable[[Path, Path, float], None]
-TextCardRendererFn = Callable[[str, float, Path], None]
+MoodVisualRendererFn = Callable[[list, float, Path], None]
 
 
 def _render_system_prompt(prompt_md: str) -> str:
@@ -88,21 +90,23 @@ def _default_zoompan(image_path: Path, output_path: Path, duration_s: float) -> 
     ken_burns_zoompan(image_path, output_path, duration_s)
 
 
-def _default_text_card_renderer(text: str, duration_s: float, dest_path: Path) -> None:
-    cfg = yaml.safe_load((REPO_ROOT / "config" / "text_card.yaml").read_text(encoding="utf-8"))
-    generate_text_card(
-        text=text,
-        duration_s=duration_s,
+def _default_mood_visual_renderer(mood_tags: list[str], duration_s: float, dest_path: Path) -> None:
+    cfg = yaml.safe_load((REPO_ROOT / "config" / "fallback_visual.yaml").read_text(encoding="utf-8"))
+    color_map = cfg.get("mood_color_map", {})
+    color1, color2 = cfg["default_color1"], cfg["default_color2"]
+    for tag in mood_tags:
+        if tag in color_map:
+            color1, color2 = color_map[tag]
+            break
+    generate_mood_visual(
         dest_path=dest_path,
+        duration_s=duration_s,
         width=cfg["width"],
         height=cfg["height"],
         fps=cfg["fps"],
-        bg_color=cfg["bg_color"],
-        text_color=cfg["text_color"],
-        font_path=cfg["font_path"],
-        font_size=cfg["font_size"],
-        max_chars_per_line=cfg["max_chars_per_line"],
-        bg_color2=cfg.get("bg_color2"),
+        color1=color1,
+        color2=color2,
+        zoom_end=cfg.get("zoom_end", 1.12),
     )
 
 
@@ -134,7 +138,7 @@ def main(
     agent_call: AgentCallFn | None = None,
     image_generator: ImageGeneratorFn | None = None,
     zoompan: ZoompanFn | None = None,
-    text_card_renderer: TextCardRendererFn | None = None,
+    mood_visual_renderer: MoodVisualRendererFn | None = None,
 ) -> StageResponse:
     run_id = run_config["run_id"]
     candidates_path = input_dir / "candidates.json"
@@ -312,12 +316,12 @@ def main(
             )
         scene_id = parsed["scene_id"]
     else:
-        # CODE mode (default, 2026-07-18): a plain ffmpeg text card per
-        # beat, using the beat's own visual_description directly - no LLM
-        # call, no diffusion model, no RAM/disk risk.
-        text_card_renderer = text_card_renderer or _default_text_card_renderer
-        text_card_cfg = yaml.safe_load((REPO_ROOT / "config" / "text_card.yaml").read_text(encoding="utf-8"))
-        min_card_duration = text_card_cfg["min_duration_s"]
+        # CODE mode (default; mood-visual since 2026-07-23, see ARCHITECTURE.md
+        # change log): a Ken-Burns-animated mood-colored gradient per beat, no
+        # text - no LLM call, no diffusion model, no RAM/disk risk.
+        mood_visual_renderer = mood_visual_renderer or _default_mood_visual_renderer
+        fallback_visual_cfg = yaml.safe_load((REPO_ROOT / "config" / "fallback_visual.yaml").read_text(encoding="utf-8"))
+        min_card_duration = fallback_visual_cfg["min_duration_s"]
         videos_dir = REPO_ROOT / "shared" / "runs" / run_id / "cache" / "generated_videos"
 
         assets = []
@@ -331,15 +335,16 @@ def main(
                     status=StageStatus.FAILED,
                     error=ErrorInfo(message=f"candidates.json references beat_id {beat_id!r} not present in beats.json"),
                 )
-            # A text card is synthetic and has no natural duration ceiling
-            # like real footage does, so it's rendered at least min_duration_s
-            # regardless of est_duration_s - the beat's own (rough) visual
-            # estimate, not a reliable predictor of real TTS narration length.
+            # A generated visual is synthetic and has no natural duration
+            # ceiling like real footage does, so it's rendered at least
+            # min_duration_s regardless of est_duration_s - the beat's own
+            # (rough) visual estimate, not a reliable predictor of real TTS
+            # narration length.
             duration_s = max(beat["est_duration_s"], min_card_duration)
             video_path = videos_dir / f"{beat_id}.mp4"
             try:
                 if not video_path.exists():
-                    text_card_renderer(beat["visual_description"], duration_s, video_path)
+                    mood_visual_renderer(beat.get("mood_tags", []), duration_s, video_path)
             except (FFmpegError, OSError) as exc:
                 render_failures.append(f"{beat_id}: {exc}")
                 continue
@@ -351,7 +356,7 @@ def main(
                     "origin": "generated_fallback",
                     "file_ref": f"shared/runs/{run_id}/cache/generated_videos/{beat_id}.mp4",
                     "duration_s": duration_s,
-                    "license": "Generated (text card) - no license required",
+                    "license": "Generated (mood visual) - no license required",
                     "attribution": {"source": "generated", "creator_required": False},
                 }
             )

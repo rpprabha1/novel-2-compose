@@ -14,14 +14,14 @@ from .audio_mix import (
     overlay_narration,
     trim_audio,
 )
-from .ffmpeg_utils import FFmpegError, extract_frames, extract_thumbnail, generate_text_card, ken_burns_zoompan, probe_duration_s, probe_resolution
+from .ffmpeg_utils import FFmpegError, extract_frames, extract_thumbnail, generate_mood_visual, ken_burns_zoompan, probe_duration_s, probe_resolution
 from .pixel_art import apply_pixel_art_style
 
 __all__ = [
     "FFmpegError",
     "extract_frames",
     "extract_thumbnail",
-    "generate_text_card",
+    "generate_mood_visual",
     "ken_burns_zoompan",
     "probe_duration_s",
     "probe_resolution",

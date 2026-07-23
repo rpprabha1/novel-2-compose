@@ -32,7 +32,11 @@ def _strip_html(value: str) -> str:
 
 
 class WikimediaCommonsSource:
-    name = "wikimedia"
+    # Must match candidates.schema.json's `source` enum value exactly
+    # ("wikimedia_commons", not "wikimedia") - a real run crashed on schema
+    # validation the first time a query actually returned a Wikimedia hit
+    # (see ARCHITECTURE.md 2026-07-23 change log entry).
+    name = "wikimedia_commons"
 
     def __init__(self, timeout_s: int = 30):
         self.timeout_s = timeout_s

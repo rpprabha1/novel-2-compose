@@ -10,8 +10,10 @@ Optional (needed for merging/converting):
 
 Usage:
     python download.py                              # interactive mode
-    python download.py "dog running uphill forest"  # one-shot mode
+    python download.py "dog running uphill forest"  # one-shot: download top 3 matches
 """
+
+from __future__ import annotations
 
 import sys
 import json
@@ -26,6 +28,15 @@ except ImportError:
 
 # ── Default download folder ────────────────────────────────────────────
 DOWNLOAD_DIR = Path(__file__).parent / "outputs"
+
+# How many of the top-ranked search results one-shot / batch mode downloads.
+TOP_N_DEFAULT = 3
+
+# YouTube increasingly blocks the default "web" client with a "page needs to be
+# reloaded" extraction error; the android client still resolves formats
+# reliably. Applied to the download call so clips actually fetch. If YouTube
+# shifts again, swap the client here (e.g. "ios", "tv", "mweb").
+YT_EXTRACTOR_ARGS = {"youtube": {"player_client": ["android"]}}
 
 
 # ── Search ──────────────────────────────────────────────────────────────
@@ -167,7 +178,7 @@ def pick_quality() -> dict:
         print("  Invalid choice — enter 1, 2, 3, or 4.")
 
 
-def download_video(url: str, dest_dir: Path | None = None) -> None:
+def download_video(url: str, dest_dir: Path | None = None, preset: dict | None = None) -> None:
     if not YT_DLP_AVAILABLE:
         print("\n  ⚠  yt-dlp is not installed. Run:  pip install yt-dlp\n")
         return
@@ -175,7 +186,10 @@ def download_video(url: str, dest_dir: Path | None = None) -> None:
     dest = dest_dir or DOWNLOAD_DIR
     dest.mkdir(parents=True, exist_ok=True)
 
-    preset = pick_quality()
+    # Prompt for quality only when the caller hasn't already chosen one. Batch
+    # downloads pick a preset once and pass it in, rather than re-asking per clip.
+    if preset is None:
+        preset = pick_quality()
 
     ydl_opts: dict = {
         "format": preset["format"],
@@ -184,6 +198,7 @@ def download_video(url: str, dest_dir: Path | None = None) -> None:
         "merge_output_format": "mp4",
         "quiet": True,
         "no_warnings": True,
+        "extractor_args": YT_EXTRACTOR_ARGS,
     }
 
     if "postprocessors" in preset:
@@ -226,6 +241,40 @@ def download_prompt(results: list[dict]) -> None:
     download_video(url)
 
 
+# ── Batch download the top-ranked results ───────────────────────────────
+def download_top_results(
+    results: list[dict],
+    count: int = TOP_N_DEFAULT,
+    dest_dir: Path | None = None,
+    preset: dict | None = None,
+) -> None:
+    """Download the first *count* results in search-rank order.
+
+    Quality is chosen once and reused for the whole batch, so it's a single
+    prompt instead of one per clip. Missing-URL entries are skipped, not fatal.
+    """
+    if not results:
+        print("\n  Nothing to download.\n")
+        return
+    if not YT_DLP_AVAILABLE:
+        print("\n  ⚠  yt-dlp is not installed. Run:  pip install yt-dlp\n")
+        return
+
+    top = results[:count]
+    if preset is None:
+        preset = pick_quality()
+
+    print(f"\n  Downloading top {len(top)} result(s) …")
+    for i, video in enumerate(top, 1):
+        title = video.get("title", "No title")
+        url = video.get("url")
+        print(f"\n  ── [{i}/{len(top)}] {title}")
+        if not url:
+            print("  ⚠  No URL for that result — skipping.\n")
+            continue
+        download_video(url, dest_dir, preset=preset)
+
+
 # ── Save results ────────────────────────────────────────────────────────
 def save_results(results: list[dict], filename: str = "video_results.json") -> None:
     dest = DOWNLOAD_DIR / filename
@@ -246,6 +295,7 @@ def interactive_mode() -> None:
     print("║                                                  ║")
     print("║  Commands:                                       ║")
     print("║    /dl N       — download result #N              ║")
+    print("║    /dltop [N]  — download the top N (default 3)  ║")
     print("║    /dl URL     — download any video URL          ║")
     print("║    /save       — save last results to JSON       ║")
     print("║    /num N      — results per search (1–20)       ║")
@@ -302,6 +352,20 @@ def interactive_mode() -> None:
                 print("  Usage: /dir ~/Videos\n")
             continue
 
+        if low.startswith("/dltop"):
+            parts = query.split()
+            count = TOP_N_DEFAULT
+            if len(parts) == 2 and parts[1].isdigit():
+                count = max(int(parts[1]), 1)
+            elif len(parts) >= 2:
+                print("  Usage: /dltop [N]  (defaults to 3)\n")
+                continue
+            if not last_results:
+                print("  Run a search first.\n")
+            else:
+                download_top_results(last_results, count=count, dest_dir=download_dir)
+            continue
+
         if low.startswith("/dl"):
             parts = query.split(maxsplit=1)
             arg = parts[1].strip() if len(parts) > 1 else ""
@@ -345,7 +409,7 @@ if __name__ == "__main__":
         try:
             results = search_videos(query)
             display_results(results)
-            download_prompt(results)
+            download_top_results(results)
         except Exception as e:
             print(f"\n  ⚠ Search error: {e}\n")
             sys.exit(1)

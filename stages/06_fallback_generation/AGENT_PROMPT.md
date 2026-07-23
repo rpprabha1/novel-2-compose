@@ -2,7 +2,7 @@
 
 Template per `CLAUDE.md` §7. Covers only the agent half of this HYBRID stage — writing the image-generation prompt. Rendering, Ken Burns zoompan, and card layout are code (`src/run.py`), not this agent's concern.
 
-**Status (2026-07-18): opt-in, not the default.** This stage now defaults to a lightweight CODE-only text-card path (`_default_text_card_renderer()` in `src/run.py`, no agent, no diffusion model) after `sd-turbo` repeatedly exhausted RAM/disk on a constrained dev machine — see `ARCHITECTURE.md`'s 2026-07-18 change log entry. This prompt remains accurate for AGENT+diffusion mode, reachable by explicitly passing `agent_call` to `main()`.
+**Status (2026-07-18, visual technique updated 2026-07-23): opt-in, not the default.** This stage now defaults to a lightweight CODE-only mood-visual path (`_default_mood_visual_renderer()` in `src/run.py`, no agent, no diffusion model) after `sd-turbo` repeatedly exhausted RAM/disk on a constrained dev machine — see `ARCHITECTURE.md`'s 2026-07-18 change log entry. That default was itself changed 2026-07-23 from an on-screen text card to a mood-colored Ken Burns gradient (no text), since `09_audio_production`'s TTS already speaks the same text aloud. This prompt remains accurate for AGENT+diffusion mode, reachable by explicitly passing `agent_call` to `main()`.
 
 ## 1. Role
 

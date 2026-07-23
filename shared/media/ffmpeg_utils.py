@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import textwrap
 from pathlib import Path
 
 
@@ -117,61 +116,41 @@ def ken_burns_zoompan(
         raise FFmpegError(f"ffmpeg Ken Burns zoompan failed for {image_path}: {result.stderr}")
 
 
-def generate_text_card(
-    text: str,
-    duration_s: float,
+def generate_mood_visual(
     dest_path: Path,
+    duration_s: float,
     width: int,
     height: int,
     fps: int,
-    bg_color: str,
-    text_color: str,
-    font_path: str,
-    font_size: int,
-    max_chars_per_line: int,
-    bg_color2: str | None = None,
+    color1: str,
+    color2: str,
+    zoom_end: float = 1.12,
 ) -> None:
-    """Lightweight ffmpeg-only fallback visual: wrapped text over the
-    background, rendered directly as a video-length clip - no diffusion
-    model, no still-image intermediate. 06_fallback_generation's default
-    CODE path (see ARCHITECTURE.md 2026-07-18) for beats with no matched
-    footage, chosen after sd-turbo repeatedly exhausted RAM/disk on a
-    constrained dev machine; this has no such risk since it's pure ffmpeg.
-
-    When bg_color2 is set (2026-07-23, see ARCHITECTURE.md change log), the
-    background is a slowly-drifting two-tone gradient (ffmpeg's `gradients`
-    lavfi source) instead of a flat solid - a static card holding for 20-40s
-    of narration read as dead air on the real chapter-1 output."""
+    """Ken-Burns-animated abstract gradient - 06_fallback_generation's
+    default visual for beats with no matched footage, replacing the earlier
+    on-screen text card (2026-07-23, see ARCHITECTURE.md change log): the
+    narration is already spoken aloud by TTS, so also displaying that same
+    text as a card is redundant and reads as a broken slideshow rather than
+    video - a real defect the author flagged directly, not a hypothetical.
+    Pure ffmpeg (a still gradient frame, then the existing ken_burns_zoompan
+    helper already used for the sd-turbo AGENT-mode path) - no agent, no
+    model, matching this stage's CODE classification.
+    """
     dest_path.parent.mkdir(parents=True, exist_ok=True)
-    wrapped = textwrap.fill(text, width=max_chars_per_line)
-    textfile_path = dest_path.with_suffix(".txt")
-    textfile_path.write_text(wrapped, encoding="utf-8")
-    if bg_color2:
-        source = (
-            f"gradients=s={width}x{height}:d={duration_s}:r={fps}:"
-            f"c0={bg_color}:c1={bg_color2}:speed=0.008:type=radial"
-        )
-    else:
-        source = f"color=c={bg_color}:s={width}x{height}:d={duration_s}:r={fps}"
+    still_path = dest_path.with_suffix(".still.png")
+    result = subprocess.run(
+        [
+            "ffmpeg", "-y", "-f", "lavfi",
+            "-i", f"gradients=s={width}x{height}:d=1:c0={color1}:c1={color2}:type=radial",
+            "-frames:v", "1", str(still_path),
+        ],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0 or not still_path.exists():
+        raise FFmpegError(f"ffmpeg mood-gradient still generation failed for {dest_path}: {result.stderr}")
     try:
-        # drawtext's textfile=/fontfile= both need literal colons (Windows
-        # drive letters) escaped for the ffmpeg filtergraph parser.
-        textfile_arg = str(textfile_path).replace("\\", "/").replace(":", "\\:")
-        fontfile_arg = font_path.replace("\\", "/").replace(":", "\\:")
-        vf = (
-            f"drawtext=textfile='{textfile_arg}':fontfile='{fontfile_arg}':"
-            f"fontcolor={text_color}:fontsize={font_size}:line_spacing=12:"
-            f"x=(w-text_w)/2:y=(h-text_h)/2:box=1:boxcolor=black@0.45:boxborderw=24"
-        )
-        result = subprocess.run(
-            [
-                "ffmpeg", "-y", "-f", "lavfi", "-i", source,
-                "-vf", vf, "-pix_fmt", "yuv420p", str(dest_path),
-            ],
-            capture_output=True,
-            text=True,
-        )
+        ken_burns_zoompan(still_path, dest_path, duration_s, fps=fps, zoom_end=zoom_end, output_size=f"{width}x{height}")
     finally:
-        textfile_path.unlink(missing_ok=True)
-    if result.returncode != 0 or not dest_path.exists():
-        raise FFmpegError(f"ffmpeg text card generation failed for {dest_path}: {result.stderr}")
+        still_path.unlink(missing_ok=True)
+
+

@@ -1,0 +1,53 @@
+# fallback_visual.yaml — style parameters for 06_fallback_generation's
+# default lightweight CODE fallback.
+#
+# Replaces the earlier text_card.yaml approach (2026-07-23, see
+# ARCHITECTURE.md change log): the old default rendered the beat's own
+# visual_description as literal on-screen text - but 09_audio_production's
+# Kokoro TTS already speaks that same text aloud as narration, so showing it
+# again on screen was purely redundant and read as a broken slideshow, not
+# video - a real defect the author flagged directly on the rendered output,
+# not a hypothetical. The new default is a Ken-Burns-animated abstract
+# gradient, colored by the beat's own mood_tags (no text at all) - still
+# pure ffmpeg, no agent, no model-loading risk, matching this stage's CODE
+# classification. AGENT+diffusion mode (sd-turbo) remains available by
+# passing an explicit agent_call, unaffected by this change.
+
+width: 1920
+height: 1080
+fps: 30
+
+# Unlike real stock footage, a generated visual has no natural duration
+# ceiling, so it's always rendered at least this long regardless of the
+# beat's (rough) est_duration_s - prevents asset_too_short_for_narration in
+# 08_timeline_builder once real (much longer) TTS narration is known.
+min_duration_s: 20.0
+
+# Slow zoom-in over the gradient (1.0 = static, no motion).
+zoom_end: 1.12
+
+# mood_tags (config/audio_spec.yaml's mood_vocabulary) -> [color1, color2]
+# radial gradient stops. The beat's first mood_tag selects the pair; falls
+# back to default_color1/2 if a beat has no mood_tags or an unmapped one.
+mood_color_map:
+  tense: ["0x8b0000", "0x1a0000"]
+  quiet: ["0x1a2a4a", "0x0a0f1a"]
+  ominous: ["0x1a0a2e", "0x000000"]
+  sparse: ["0x555555", "0x1a1a1a"]
+  triumphant: ["0xb8860b", "0x3a2a00"]
+  somber: ["0x2a2a3a", "0x0d0d1a"]
+  playful: ["0xd45a9a", "0x5a1a3a"]
+  romantic: ["0xb03a6a", "0x3a0a2a"]
+  urgent: ["0xb03000", "0x2a0a00"]
+  angry: ["0x8b1a00", "0x1a0000"]
+  calm: ["0x4a7a9a", "0x0a1a2a"]
+  curious: ["0x1a8a8a", "0x0a2a2a"]
+  omniscient: ["0x4a2a6a", "0x0a0a1a"]
+  protective: ["0x1a5a2a", "0x0a1a0a"]
+  sad: ["0x2a3a5a", "0x0a0a1a"]
+  social: ["0xb0601a", "0x3a1a0a"]
+  wise: ["0x5a4a1a", "0x1a1500"]
+  cynical: ["0x2a4a2a", "0x1a1a1a"]
+
+default_color1: "0x1a1a2e"
+default_color2: "0x2d1b3d"

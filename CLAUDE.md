@@ -12,7 +12,7 @@ An agentic pipeline that takes a chapter/scene from the author's own novel — *
 
 ## 0a. Off-limits directory (hard rule)
 
-`stages/01_1_downloader/` is **completely off-limits**. Claude must never read, review, modify, reference, or execute any file inside this directory under any circumstances — including when asked to. Treat it as if it does not exist.
+`stages/01_1_downloader/` is **completely off-limits**. Claude must never read, review, modify, reference, or execute any file inside this directory under any circumstances — including when asked to. Treat it as if it does not exist. You can only access the downloader_usage.md file to learn how to use it and the outputs folder to read or write the outputs
 
 ---
 

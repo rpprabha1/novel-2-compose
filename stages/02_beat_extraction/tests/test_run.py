@@ -331,6 +331,93 @@ def test_main_merges_adjacent_duplicate_visual_beats(tmp_path):
     assert [b["order"] for b in beats] == [0, 1, 2]
 
 
+def test_diversify_repeated_search_queries_rewrites_only_shared_queries():
+    beats = [
+        {
+            "beat_id": "b001",
+            "visual_description": "The old pig climbs onto a raised platform of straw bales.",
+            "search_query": "pig speaking barn",
+        },
+        {
+            "beat_id": "b002",
+            "visual_description": "Rows of animals settle quietly to listen in the dim barn light.",
+            "search_query": "pig speaking barn",
+        },
+        {
+            "beat_id": "b003",
+            "visual_description": "A dog barks sharply at the fence line outside.",
+            "search_query": "dog barking fence",
+        },
+    ]
+
+    rewritten = run._diversify_repeated_search_queries(beats)
+
+    assert rewritten == 2
+    assert beats[0]["search_query"] != beats[1]["search_query"]
+    assert beats[0]["search_query"] == run.extract_search_terms(beats[0]["visual_description"])
+    assert beats[1]["search_query"] == run.extract_search_terms(beats[1]["visual_description"])
+    # Untouched: its query wasn't shared with any other beat.
+    assert beats[2]["search_query"] == "dog barking fence"
+
+
+def test_main_diversifies_repeated_search_query_beats(tmp_path):
+    """Standing directive (2026-07-23): the model has repeatedly assigned an
+    identical search_query to many beats with distinct visual content -
+    fixed with strict deterministic code, not further prompt tuning."""
+    input_dir = tmp_path / "inputs"
+    output_dir = tmp_path / "outputs"
+    three_para_text = (
+        "The old pig climbed onto a raised platform of straw bales to address the others.\n\n"
+        "Rows of animals settled quietly to listen in the dim barn light.\n\n"
+        "A dog barked sharply at the fence line outside."
+    )
+    _write_scene(input_dir, text=three_para_text)
+    repeated_query_json = json.dumps(
+        {
+            "beats": [
+                {
+                    "beat_id": "ch1_sc1_b001",
+                    "order": 0,
+                    "text_excerpt_ref": "para:1",
+                    "visual_description": "The old pig climbs onto a raised platform of straw bales.",
+                    "est_duration_s": 4.0,
+                    "mood_tags": ["quiet"],
+                    "no_visual_analog": False,
+                    "search_query": "pig speaking barn",
+                },
+                {
+                    "beat_id": "ch1_sc1_b002",
+                    "order": 1,
+                    "text_excerpt_ref": "para:2",
+                    "visual_description": "Rows of animals settle quietly to listen in the dim barn light.",
+                    "est_duration_s": 4.0,
+                    "mood_tags": ["quiet"],
+                    "no_visual_analog": False,
+                    "search_query": "pig speaking barn",
+                },
+                {
+                    "beat_id": "ch1_sc1_b003",
+                    "order": 2,
+                    "text_excerpt_ref": "para:3",
+                    "visual_description": "A dog barks sharply at the fence line outside.",
+                    "est_duration_s": 3.0,
+                    "mood_tags": ["tense"],
+                    "no_visual_analog": False,
+                    "search_query": "dog barking fence",
+                },
+            ]
+        }
+    )
+
+    response = run.main(input_dir, output_dir, BASE_RUN_CONFIG, agent_call=lambda s, u: repeated_query_json)
+
+    assert response.status.value == "COMPLETE"
+    assert "Diversified 2 repeated search_query beat(s)" in response.summary
+    beats = json.loads((output_dir / "beats.json").read_text(encoding="utf-8"))["beats"]
+    assert beats[0]["search_query"] != beats[1]["search_query"]
+    assert beats[2]["search_query"] == "dog barking fence"
+
+
 def test_main_missing_scene_file_fails(tmp_path):
     input_dir = tmp_path / "inputs"
     input_dir.mkdir()

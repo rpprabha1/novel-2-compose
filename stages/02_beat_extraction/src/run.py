@@ -36,6 +36,7 @@ from shared.envelopes import (  # noqa: E402
     StageStatus,
     validate_against_schema,
 )
+from shared.text import extract_search_terms  # noqa: E402
 
 STAGE_NAME = "02_beat_extraction"
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "AGENT_PROMPT.md"
@@ -156,6 +157,40 @@ def _merge_duplicate_visual_beats(beats: list[dict]) -> list[dict]:
         beat["order"] = i
         beat["beat_id"] = f"{prefix}_b{i + 1:03d}"
     return merged
+
+
+def _diversify_repeated_search_queries(beats: list[dict]) -> int:
+    """Mechanical, deterministic post-process (CLAUDE.md rule 4, same
+    reasoning as _merge_duplicate_visual_beats) - the model has repeatedly
+    assigned the identical `search_query` to many beats with genuinely
+    different `visual_description` content (observed for real: ~18
+    consecutive beats covering distinct points of a single scene's speech
+    all got "pig speaking barn"), which starves Stage 03's candidate search
+    of any per-beat specificity - every one of those beats searches for and
+    scores against the exact same handful of stock clips regardless of what
+    that beat is actually about. Not fixed by asking the prompt more
+    sternly (author's standing direction, 2026-07-22: strict code over
+    further prompt tuning) - any `search_query` string shared by more than
+    one beat in this scene is mechanically replaced, for every beat sharing
+    it, with a deterministic per-beat extraction from that beat's own
+    `visual_description` (shared/text.extract_search_terms - the same
+    function Stage 03 already falls back to when a beat has no
+    `search_query` at all). Mutates beats in place; returns how many beats
+    were rewritten.
+    """
+    counts: dict[str, int] = {}
+    for beat in beats:
+        query = (beat.get("search_query") or "").strip().lower()
+        if query:
+            counts[query] = counts.get(query, 0) + 1
+
+    rewritten = 0
+    for beat in beats:
+        query = (beat.get("search_query") or "").strip().lower()
+        if query and counts.get(query, 0) > 1:
+            beat["search_query"] = extract_search_terms(beat["visual_description"])
+            rewritten += 1
+    return rewritten
 
 
 def _needs_input(run_id: str, reason_code: str, question: str, options: list[str]) -> StageResponse:
@@ -296,6 +331,8 @@ def main(
     parsed["beats"] = beats
     beats_merged_count = beats_before_merge - len(beats)
 
+    diversified_query_count = _diversify_repeated_search_queries(beats)
+
     no_visual_count = sum(1 for b in beats if b.get("no_visual_analog"))
     if no_visual_count > len(beats) / 2:
         return _needs_input(
@@ -328,6 +365,8 @@ def main(
         summary += f" Dropped {len(dropped_tags)} out-of-vocabulary mood tag(s): {dropped_tags}."
     if beats_merged_count:
         summary += f" Merged {beats_merged_count} duplicate-visual beat(s) into their neighbors."
+    if diversified_query_count:
+        summary += f" Diversified {diversified_query_count} repeated search_query beat(s)."
     if long_beats:
         summary += f" HITL: {len(long_beats)} beat(s) over 15s."
     if under_segmented:

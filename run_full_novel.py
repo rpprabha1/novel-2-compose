@@ -29,6 +29,7 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
+from typing import Callable
 
 import yaml
 
@@ -36,7 +37,7 @@ REPO_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from shared.envelopes import StageStatus  # noqa: E402
-from shared.media import generate_text_card  # noqa: E402
+from shared.media import generate_mood_visual  # noqa: E402
 from shared.sources import GeneratedMusicSource, JamendoMusicSource, generated_audio_downloader  # noqa: E402
 
 
@@ -197,25 +198,96 @@ def _single_scene_wide_cue_agent_call(beats_path: Path):
     return _call
 
 
+_STALE_TRACK_REF_RE = re.compile(r"not among cue '([^']+)'")
+
+
+class _CachingMusicSource:
+    """Wraps a real MusicSource so repeated `.search()` calls with the same
+    mood_tags return the identical result within one resolve_music_stage()
+    resolution sequence. A live network source (Jamendo) is not guaranteed
+    to return byte-identical top-N results across two separate real calls -
+    combined with the cue-sheet freeze below, this removes both sources of
+    the non-determinism that produced a real "hitl_decisions references
+    track_ref ... not among cue's candidates" crash (2026-07-23, see
+    ARCHITECTURE.md/DECISIONS_LOG.md)."""
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+        self._cache: dict[tuple, list] = {}
+
+    def search(self, mood_tags, max_results: int = 3):
+        key = (tuple(mood_tags), max_results)
+        if key not in self._cache:
+            self._cache[key] = self._inner.search(mood_tags, max_results)
+        return self._cache[key]
+
+
+def _frozen_cue_sheet_agent_call(cues: list[dict]) -> Callable:
+    """Replays an already-produced, already-schema-valid cue-sheet verbatim
+    instead of calling the LLM again - used once a real attempt's cue-sheet
+    clears validation, so later calls in the same resolution sequence (asking
+    for track_selection, or resubmitting hitl_decisions) can't have their
+    cue_ids/mood_tags shift out from under an in-progress track choice."""
+    def _call(system_prompt: str, user_message: str) -> str:  # noqa: ARG001
+        return json.dumps({"cues": cues})
+    return _call
+
+
 def resolve_music_stage(run_config: dict, out_dir: Path, decisions_log: list) -> "StageResponse":
     """Stage 09's cue-sheet is a fresh (non-deterministic) LLM call on every
-    invocation - there's no way to pass a previously-generated cue-sheet back
-    in, only a cue_id -> track_ref hitl_decisions map. So a single retry with
-    decisions built from attempt 1's cue_ids can still land on track_selection
-    again if attempt 2's regenerated cue-sheet doesn't happen to reuse the
-    same cue_ids (observed for real). Loop, accumulating decisions across
-    attempts, until resolved or a bounded number of attempts is exhausted -
-    then fall back to a deterministic single-cue agent_call rather than keep
-    retrying an LLM call that has already proven unreliable this run.
+    invocation, and its live MusicSource search is re-run fresh too (no
+    caching in Stage 09 itself) - there's no way to pass a previously-
+    generated cue-sheet back in except via a custom agent_call. Observed for
+    real 2026-07-23 (once real footage search started returning genuinely
+    varied per-beat mood_tags - see ARCHITECTURE.md's search_query
+    diversification entry): a track_ref recorded as this run's decision for
+    cue_id X on attempt 1 was no longer among cue X's candidates on attempt
+    2, because BOTH the cue-sheet (different mood_tags) and the live Jamendo
+    search (different results for those different tags) had changed under
+    it - Stage 09 correctly refused to guess and returned FAILED.
+
+    Root-cause fix: once an attempt's cue-sheet first clears validation
+    (music_cue_intent.json exists), freeze it via `_frozen_cue_sheet_agent_call`
+    for every later call in this same resolution sequence, and wrap
+    music_source in `_CachingMusicSource` so an identical mood_tags query
+    always returns the identical candidate list. Together these make the
+    "ask for a track, then resubmit the choice" round trip fully stable
+    instead of each half being able to drift independently. The retry loop
+    below also keeps a bounded drop-stale-and-retry safety net (matching the
+    existing cues_incomplete precedent) in case anything still slips through.
     """
     main09 = stage_main(9)
     music_source, music_downloader = _build_music_source()
-    kwargs = dict(music_source=music_source)
+    kwargs = dict(music_source=_CachingMusicSource(music_source))
     if music_downloader is not None:
         kwargs["downloader"] = music_downloader
     hitl_decisions: dict[str, str] = {}
     resp = main09(stage_dir(9) / "inputs", out_dir, run_config, **kwargs)
+    intent_path = out_dir / "music_cue_intent.json"
     for _ in range(5):
+        if "agent_call" not in kwargs and intent_path.exists():
+            frozen_cues = json.loads(intent_path.read_text(encoding="utf-8")).get("cues") or []
+            if frozen_cues:
+                kwargs["agent_call"] = _frozen_cue_sheet_agent_call(frozen_cues)
+        if resp.status == StageStatus.FAILED:
+            stale_match = _STALE_TRACK_REF_RE.search(resp.error.message or "") if resp.error else None
+            stale_cue_id = stale_match.group(1) if stale_match else None
+            if stale_cue_id is not None and hitl_decisions.pop(stale_cue_id, None) is not None:
+                decisions_log.append(
+                    {
+                        "stage": "09_audio_production",
+                        "decision_point": "stale_track_selection",
+                        "cue_id": stale_cue_id,
+                        "policy": "dropped and re-asked: the previously chosen track_ref fell out of this cue's "
+                        "candidates despite the cue-sheet freeze/music-search cache (belt-and-suspenders retry)",
+                    }
+                )
+                resp = main09(
+                    stage_dir(9) / "inputs", out_dir, run_config,
+                    hitl_decisions=dict(hitl_decisions), selected_by="claude_autonomous_policy", **kwargs,
+                )
+                continue
+            break
         if resp.status != StageStatus.NEEDS_INPUT:
             break
         if any(item.reason_code == "cues_incomplete" for item in resp.needs_input):
@@ -246,21 +318,43 @@ def resolve_music_stage(run_config: dict, out_dir: Path, decisions_log: list) ->
             hitl_decisions=dict(hitl_decisions), selected_by="claude_autonomous_policy", **kwargs,
         )
 
-    if resp.status == StageStatus.NEEDS_INPUT and any(item.reason_code == "cues_incomplete" for item in resp.needs_input):
+    persistent_stale_ref = resp.status == StageStatus.FAILED and _STALE_TRACK_REF_RE.search(
+        resp.error.message or "" if resp.error else ""
+    )
+    if persistent_stale_ref or (
+        resp.status == StageStatus.NEEDS_INPUT and any(item.reason_code == "cues_incomplete" for item in resp.needs_input)
+    ):
         decisions_log.append(
             {
                 "stage": "09_audio_production",
-                "decision_point": "cues_incomplete",
-                "policy": "5 real cue-sheet generation attempts all failed structurally (invalid/incomplete beat ranges) - "
-                "fell back to a deterministic single scene-wide cue (matches the human-approved 2026-07-18 precedent "
-                "in DECISIONS_LOG.md for this same failure mode) instead of continuing to retry an unreliable LLM call",
+                "decision_point": "cues_incomplete" if not persistent_stale_ref else "stale_track_selection",
+                "policy": "5 real attempts all failed structurally (invalid/incomplete beat ranges, or the live "
+                "music search kept invalidating this run's prior track choice) - fell back to a deterministic "
+                "single scene-wide cue (matches the human-approved 2026-07-18 precedent in DECISIONS_LOG.md for "
+                "this same failure mode) instead of continuing to retry an unreliable LLM call/live search",
             }
         )
         beats_path = stage_dir(9) / "inputs" / "beats.json"
         fallback_kwargs = dict(kwargs, agent_call=_single_scene_wide_cue_agent_call(beats_path))
         resp = main09(stage_dir(9) / "inputs", out_dir, run_config, **fallback_kwargs)
-        if resp.status == StageStatus.NEEDS_INPUT:
-            hitl_decisions = {}
+        hitl_decisions = {}
+        # Bounded retry here too: the deterministic single-cue sheet removes
+        # the LLM's cue-boundary non-determinism, but the live music search
+        # behind it is still re-run fresh on every call and can hit the same
+        # stale-track_ref race handled above.
+        for _ in range(3):
+            if resp.status == StageStatus.FAILED:
+                stale_match = _STALE_TRACK_REF_RE.search(resp.error.message or "") if resp.error else None
+                stale_cue_id = stale_match.group(1) if stale_match else None
+                if stale_cue_id is not None and hitl_decisions.pop(stale_cue_id, None) is not None:
+                    resp = main09(
+                        stage_dir(9) / "inputs", out_dir, run_config,
+                        hitl_decisions=dict(hitl_decisions), selected_by="claude_autonomous_policy", **fallback_kwargs,
+                    )
+                    continue
+                break
+            if resp.status != StageStatus.NEEDS_INPUT:
+                break
             for item in resp.needs_input:
                 if item.reason_code != "track_selection" or not item.options:
                     continue
@@ -282,7 +376,7 @@ def resolve_music_stage(run_config: dict, out_dir: Path, decisions_log: list) ->
                 )
             resp = main09(
                 stage_dir(9) / "inputs", out_dir, run_config,
-                hitl_decisions=hitl_decisions, selected_by="claude_autonomous_policy", **fallback_kwargs,
+                hitl_decisions=dict(hitl_decisions), selected_by="claude_autonomous_policy", **fallback_kwargs,
             )
     return resp
 
@@ -311,17 +405,18 @@ def extend_undersized_assets_for_narration(
     clips are typically a few seconds long, but this pipeline's beats (~4
     sentences of narration each) routinely need 20-40s+ of coverage. Rather
     than loop/stretch real footage (explicitly forbidden), regenerate a
-    fresh, sufficiently-long text card for exactly the affected beat(s) -
+    fresh, sufficiently-long mood visual for exactly the affected beat(s) -
     the same fix already applied to Stage 06's own fallback lane (see
-    config/text_card.yaml's min_duration_s comment) for beats with no
+    config/fallback_visual.yaml's min_duration_s comment) for beats with no
     matched footage at all, extended here to beats that DID get real footage
     but not enough of it. Mutates merged_assets/edit_plan in place. Returns
     True if anything was changed (i.e. Stage 08 is worth retrying).
     """
     narration_duration_by_beat = {s["beat_id"]: s["duration_s"] for s in audio_mix.get("narration_stems", [])}
-    text_card_cfg = yaml.safe_load((REPO_ROOT / "config" / "text_card.yaml").read_text(encoding="utf-8"))
+    fallback_visual_cfg = yaml.safe_load((REPO_ROOT / "config" / "fallback_visual.yaml").read_text(encoding="utf-8"))
     videos_dir = REPO_ROOT / f"shared/runs/{run_id}/cache/generated_videos"
     beats_by_plan_id = {b["beat_id"]: b for b in edit_plan.get("beats", [])}
+    color_map = fallback_visual_cfg.get("mood_color_map", {})
     changed = False
 
     for item in fallback_items:
@@ -334,22 +429,23 @@ def extend_undersized_assets_for_narration(
         if needed is None or beat is None or plan_beat is None:
             continue
 
-        duration_s = max(needed + 2.0, text_card_cfg["min_duration_s"])
+        duration_s = max(needed + 2.0, fallback_visual_cfg["min_duration_s"])
         asset_id = f"{beat_id}_narration_extended"
         video_path = videos_dir / f"{beat_id}_narration_extended.mp4"
-        generate_text_card(
-            text=beat["visual_description"],
-            duration_s=duration_s,
+        color1, color2 = fallback_visual_cfg["default_color1"], fallback_visual_cfg["default_color2"]
+        for tag in beat.get("mood_tags", []):
+            if tag in color_map:
+                color1, color2 = color_map[tag]
+                break
+        generate_mood_visual(
             dest_path=video_path,
-            width=text_card_cfg["width"],
-            height=text_card_cfg["height"],
-            fps=text_card_cfg["fps"],
-            bg_color=text_card_cfg["bg_color"],
-            text_color=text_card_cfg["text_color"],
-            font_path=text_card_cfg["font_path"],
-            font_size=text_card_cfg["font_size"],
-            max_chars_per_line=text_card_cfg["max_chars_per_line"],
-            bg_color2=text_card_cfg.get("bg_color2"),
+            duration_s=duration_s,
+            width=fallback_visual_cfg["width"],
+            height=fallback_visual_cfg["height"],
+            fps=fallback_visual_cfg["fps"],
+            color1=color1,
+            color2=color2,
+            zoom_end=fallback_visual_cfg.get("zoom_end", 1.12),
         )
 
         merged_assets["assets"] = [a for a in merged_assets["assets"] if a["beat_id"] != beat_id]
@@ -360,7 +456,7 @@ def extend_undersized_assets_for_narration(
                 "origin": "generated_fallback",
                 "file_ref": f"shared/runs/{run_id}/cache/generated_videos/{beat_id}_narration_extended.mp4",
                 "duration_s": duration_s,
-                "license": "Generated (text card) - no license required",
+                "license": "Generated (mood visual) - no license required",
                 "attribution": {"source": "generated", "creator_required": False},
             }
         )
@@ -380,6 +476,26 @@ def extend_undersized_assets_for_narration(
             }
         )
     return changed
+
+
+def clear_fallback_visual_cache(run_id: str) -> None:
+    """Stage 06 caches each beat's generated fallback clip by beat_id
+    filename (`if not video_path.exists(): render(...)`) - reasonable for a
+    single run, but this orchestrator re-runs the same scene_id multiple
+    times across smoke-test/config-change attempts under one shared run_id.
+    Without this, a stale clip rendered under the OLD design (e.g. the
+    on-screen text card retired 2026-07-23) gets silently reused after a
+    visual-design fix, since the beat_id filename hasn't changed even though
+    what should be rendered at that path has - caught for real: after
+    replacing text cards with mood-visual gradients, Stage 6 reported
+    "COMPLETE...Generated 25 fallback asset(s)" but frame-extraction showed
+    the OLD text card, because the cached file predated the fix and was
+    never regenerated. See DECISIONS_LOG.md. Cleared once per scene, before
+    that scene's own Stage 06 call.
+    """
+    d = REPO_ROOT / f"shared/runs/{run_id}/cache/generated_videos"
+    if d.exists():
+        shutil.rmtree(d)
 
 
 def clear_audio_cache(run_id: str) -> None:
@@ -468,6 +584,7 @@ def run_scene(scene: dict, run_config: dict, reuse_beats: Path | None = None) ->
 
     # --- Stage 06 (CODE-default; always invoked, no-ops if nothing routed) ---
     clean_io(6)
+    clear_fallback_visual_cache(run_config["run_id"])
     shutil.copy(beats_path, stage_dir(6) / "inputs" / "beats.json")
     shutil.copy(ranked_candidates_path, stage_dir(6) / "inputs" / "candidates.json")
     resp06 = stage_main(6)(stage_dir(6) / "inputs", stage_dir(6) / "outputs", run_config)
