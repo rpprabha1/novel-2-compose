@@ -24,7 +24,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from shared.envelopes import ErrorInfo, StageResponse, StageStatus  # noqa: E402
 from shared.media import (  # noqa: E402
     FFmpegError,
-    concat_hard_cut,
+    concat_stream_copy,
     dip_to_black_transition,
     match_duration,
     mux_video_audio,
@@ -98,24 +98,62 @@ def main(input_dir: Path, output_dir: Path, run_config: dict, render_cfg: dict |
             )
         normalized.append(dest)
 
+    # Build the render unit list: walk every clip boundary in order, exactly
+    # like the original design (so every clip's own transition_out is honored,
+    # including the rare case of two real transitions in a row - e.g. a
+    # single-shot beat that both fades in and immediately fades out again).
+    # A hard-cut/match-cut-suggestion boundary (duration 0) closes off the
+    # current unit as-is; a real transition (crossfade/dip-to-black) blends
+    # the current unit's tail against the next clip in place, so `current`
+    # only ever grows across a genuine RUN of consecutive real transitions
+    # (rare and short - almost always just 2 clips), never across the whole
+    # video. Finished units are joined with one lossless stream-copy pass.
+    #
+    # Rewritten 2026-07-24 (real bug, see ARCHITECTURE.md change log): the
+    # previous implementation instead treated `current` as the WHOLE growing
+    # video and re-encoded it in full on every single clip boundary - O(n^2)
+    # in clip count. Fine at the small scale this was originally tested at,
+    # but 07_2_narration_shot_mapping's real output (hundreds of extracted
+    # shots per scene) made this genuinely infeasible: a real run was still
+    # short of finishing after 1.5+ hours with per-step time still climbing
+    # (16s -> 187s and rising), on track for many more hours. Fixed to bound
+    # re-encoding to only the actual beat-boundary transitions, with every
+    # hard-cut boundary (the overwhelming majority - all of 07_2's intra-beat
+    # shot cuts) joined for free via ffmpeg's concat demuxer (stream copy, no
+    # decode/re-encode at all) - same transition semantics (crossfade still
+    # borrows tdur from each side, dip-to-black still leaves total duration
+    # unchanged), only the re-encoding COST changed.
+    #
+    # Bridge cache filenames are content-derived (hash of the two INPUT
+    # filenames, which are themselves content-derived - normalize_clip's own
+    # output names already hash file_ref/source_in_s/source_out_s), not
+    # position-based - the same fix already applied to normalize_clip's own
+    # cache (2026-07-18) for the identical staleness failure mode: a stale
+    # bridge silently reused across a changed edit_plan/timeline.json.
+    units: list[Path] = []
     current = normalized[0]
     try:
-        running_duration = probe_duration_s(current)
-        for i in range(1, len(clips)):
-            transition = clips[i - 1].get("transition_out") or {"type": "hard-cut", "duration_s": 0.0}
-            b = normalized[i]
-            combined = cache_dir / f"combined_{i:02d}.mp4"
+        for i in range(len(normalized) - 1):
+            transition = clips[i].get("transition_out") or {"type": "hard-cut", "duration_s": 0.0}
             ttype, tdur = transition.get("type", "hard-cut"), transition.get("duration_s", 0.0)
-            if ttype == "crossfade" and tdur > 0:
-                xfade_transition(current, b, running_duration, tdur, video_codec, crf, combined)
-                running_duration = running_duration + probe_duration_s(b) - tdur
-            elif ttype == "dip-to-black" and tdur > 0:
-                dip_to_black_transition(current, b, tdur, video_codec, crf, combined)
-                running_duration += probe_duration_s(b)
+            nxt = normalized[i + 1]
+            if ttype in ("crossfade", "dip-to-black") and tdur > 0:
+                bridge_key = hashlib.sha256(f"{current.name}|{nxt.name}|{ttype}|{tdur}".encode()).hexdigest()[:16]
+                bridge = cache_dir / f"bridge_{bridge_key}.mp4"
+                if not bridge.exists():
+                    if ttype == "crossfade":
+                        xfade_transition(current, nxt, probe_duration_s(current), tdur, video_codec, crf, bridge)
+                    else:
+                        dip_to_black_transition(current, nxt, tdur, video_codec, crf, bridge)
+                current = bridge
             else:
-                concat_hard_cut(current, b, video_codec, crf, combined)
-                running_duration += probe_duration_s(b)
-            current = combined
+                units.append(current)
+                current = nxt
+        units.append(current)
+
+        assembled = cache_dir / "assembled.mp4"
+        concat_stream_copy(units, assembled)
+        current = assembled
     except FFmpegError as exc:
         return StageResponse(
             envelope_id="",

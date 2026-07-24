@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "shot_map.schema.json",
+  "title": "ShotMap",
+  "description": "Output of 07_2_narration_shot_mapping: the narration-to-shot mapping. For each beat, the ordered short shots physically extracted from the downloader lane's clips that together cover that beat's narration. Source-free, consistent with the downloader lane (a clip is identified only by its neutral clip_id + file_ref, never a platform/url/creator/license).",
+  "type": "object",
+  "required": ["run_id", "scene_id", "beats"],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": { "type": "string" },
+    "scene_id": { "type": "string" },
+    "beats": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["beat_id", "narration_duration_s", "shots"],
+        "additionalProperties": false,
+        "properties": {
+          "beat_id": { "type": "string" },
+          "narration_duration_s": { "type": "number", "minimum": 0, "description": "The narration duration this beat's shots were mapped to cover (from 09_audio_production's audio_mix.json, falling back to the beat's est_duration_s when no narration stem exists)." },
+          "shots": {
+            "type": "array",
+            "description": "Ordered shots covering the narration window. Empty only if the beat had no scored clip at all.",
+            "items": {
+              "type": "object",
+              "required": ["shot_id", "asset_id", "source_clip_id", "source_file_ref", "source_in_s", "source_out_s", "extracted_file_ref", "duration_s", "narration_start_s", "narration_end_s"],
+              "additionalProperties": false,
+              "properties": {
+                "shot_id": { "type": "string" },
+                "asset_id": { "type": "string", "description": "The extracted shot's asset_id in assets_manifest.json (its file_ref is the extracted short clip)." },
+                "source_clip_id": { "type": "string", "description": "Neutral clip_id of the downloader clip this shot was cut from (from scene_scores/downloader_manifest)." },
+                "source_file_ref": { "type": "string", "description": "Repo-relative path of the source downloader clip." },
+                "source_in_s": { "type": "number", "minimum": 0, "description": "Start of the window cut from the source clip." },
+                "source_out_s": { "type": "number", "exclusiveMinimum": 0, "description": "End of the window cut from the source clip." },
+                "extracted_file_ref": { "type": "string", "description": "Repo-relative path of the physically-extracted short shot file." },
+                "duration_s": { "type": "number", "exclusiveMinimum": 0, "description": "Actual (ffprobed) duration of the extracted shot file." },
+                "narration_start_s": { "type": "number", "minimum": 0, "description": "Start offset within this beat's narration that this shot covers." },
+                "narration_end_s": { "type": "number", "minimum": 0, "description": "End offset within this beat's narration that this shot covers." }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

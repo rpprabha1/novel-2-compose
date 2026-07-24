@@ -11,6 +11,38 @@ from pathlib import Path
 from .ffmpeg_utils import FFmpegError, probe_duration_s
 
 
+def concat_stream_copy(paths: list[Path], dest_path: Path) -> None:
+    """Losslessly concatenate same-codec/resolution/fps/pix_fmt clips via
+    ffmpeg's concat DEMUXER with -c copy - a stream copy, O(1) work per clip
+    (no decode/re-encode at all), unlike concat_hard_cut's filter_complex
+    re-encode. Safe here because every input is either a normalize_clip()
+    output (identical encode settings every time) or a transition bridge
+    produced with the same video_codec/crf/pix_fmt (see
+    11_assembly_render/src/run.py) - concat demuxer's documented use case is
+    exactly "join files sharing codec parameters"."""
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    if len(paths) == 1:
+        dest_path.write_bytes(Path(paths[0]).read_bytes())
+        return
+    list_path = dest_path.with_suffix(".concat.txt")
+    lines = []
+    for p in paths:
+        # ffmpeg's concat-demuxer format: forward slashes, single-quoted,
+        # embedded single quotes escaped as '\''.
+        escaped = str(Path(p).resolve()).replace("\\", "/").replace("'", "'\\''")
+        lines.append(f"file '{escaped}'")
+    list_path.write_text("\n".join(lines), encoding="utf-8")
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_path), "-c", "copy", str(dest_path)],
+            capture_output=True, text=True,
+        )
+    finally:
+        list_path.unlink(missing_ok=True)
+    if result.returncode != 0 or not dest_path.exists():
+        raise FFmpegError(f"stream-copy concat failed for {len(paths)} clip(s): {result.stderr}")
+
+
 def normalize_clip(
     src_path: Path,
     source_in_s: float,
@@ -44,24 +76,6 @@ def normalize_clip(
     )
     if result.returncode != 0 or not dest_path.exists():
         raise FFmpegError(f"clip normalization failed for {src_path}: {result.stderr}")
-
-
-def concat_hard_cut(a_path: Path, b_path: Path, video_codec: str, crf: int, dest_path: Path) -> None:
-    """Instant cut - used for hard-cut and match-cut-suggestion (a match cut
-    is a compositional match, not a timed blend)."""
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(
-        [
-            "ffmpeg", "-y", "-i", str(a_path), "-i", str(b_path),
-            "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[outv]",
-            "-map", "[outv]", "-c:v", video_codec, "-crf", str(crf), "-pix_fmt", "yuv420p",
-            str(dest_path),
-        ],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0 or not dest_path.exists():
-        raise FFmpegError(f"hard-cut concat failed: {result.stderr}")
 
 
 def xfade_transition(

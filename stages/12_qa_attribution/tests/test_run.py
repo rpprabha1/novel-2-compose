@@ -97,7 +97,7 @@ def test_all_checks_pass(tmp_path):
 def test_missing_artifact_fails_schema_check(tmp_path):
     input_dir, output_dir = tmp_path / "in", tmp_path / "out"
     artifacts = _valid_artifacts()
-    del artifacts["candidates.json"]
+    del artifacts["beats.json"]  # a REQUIRED artifact (candidates/scene_scores are optional)
     _write(input_dir, artifacts, final_duration=3.0)
 
     response = run.main(input_dir, output_dir, RUN_CONFIG, thresholds=THRESHOLDS, audio_spec=AUDIO_SPEC)
@@ -107,7 +107,38 @@ def test_missing_artifact_fails_schema_check(tmp_path):
     assert report["pass"] is False
     schema_check = next(c for c in report["checks"] if c["name"] == "schema_validation")
     assert schema_check["pass"] is False
-    assert "candidates.json" in schema_check["detail"]
+    assert "beats.json" in schema_check["detail"]
+
+
+def test_optional_footage_lane_artifacts_downloader_run_passes(tmp_path):
+    # 2026-07-24 downloader-lane cutover: a run uses either the stock lane
+    # (candidates.json) or the downloader lane (scene_scores.json), so both are
+    # optional/validate-if-present. A downloader-lane run has no candidates.json
+    # and source-free `origin: "downloader"` assets - and must still pass QA.
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    artifacts = _valid_artifacts()
+    del artifacts["candidates.json"]
+    artifacts["scene_scores.json"] = {
+        "run_id": "test_run_12", "scene_id": "s1",
+        "scores_by_beat": [{"beat_id": "b1", "ranked_clips": [
+            {"clip_id": "clip_001", "file_ref": "f.mp4", "score": 0.31, "rank": 1, "frames_scored": 3}
+        ]}],
+    }
+    artifacts["assets_manifest.json"]["assets"][0] = {
+        "beat_id": "b1", "asset_id": "b1__clip_001", "origin": "downloader",
+        "file_ref": "f.mp4", "duration_s": 3.0, "confidence": 0.31, "rank": 1,
+        "license": "Downloader lane (source-free) - no source or license recorded",
+        "attribution": {"source": "downloader", "creator_required": False},
+    }
+    # Source-free lane records no footage manifest entry; keep only the music one.
+    artifacts["manifest.json"]["entries"] = [artifacts["manifest.json"]["entries"][1]]
+    _write(input_dir, artifacts, final_duration=3.0)
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG, thresholds=THRESHOLDS, audio_spec=AUDIO_SPEC)
+
+    assert response.status.value == "COMPLETE"
+    report = json.loads((output_dir / "qa_report.json").read_text(encoding="utf-8"))
+    assert report["pass"] is True
 
 
 def test_attribution_missing_creator_fails(tmp_path):

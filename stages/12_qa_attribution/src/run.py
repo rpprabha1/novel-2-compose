@@ -29,6 +29,8 @@ STAGE_NAME = "12_qa_attribution"
 ARTIFACT_SCHEMA_MAP = {
     "beats.json": "beats.schema.json",
     "candidates.json": "candidates.schema.json",
+    "scene_scores.json": "scene_scores.schema.json",
+    "shot_map.json": "shot_map.schema.json",
     "assets_manifest.json": "assets_manifest.schema.json",
     "edit_plan.json": "edit_plan.schema.json",
     "timeline.json": "timeline.schema.json",
@@ -36,6 +38,14 @@ ARTIFACT_SCHEMA_MAP = {
     "audio_mix.json": "audio_mix.schema.json",
     "manifest.json": "manifest.schema.json",
 }
+
+# Artifacts that a run may legitimately not have, validated only if present.
+# `candidates.json` (the stock Pexels/Pixabay lane's output) and
+# `scene_scores.json` (the downloader lane's output) are mutually exclusive
+# footage-lane artifacts as of the 2026-07-23 downloader-lane cutover - a run
+# uses one lane or the other, so neither is required, but whichever is present
+# is still schema-checked.
+_OPTIONAL_ARTIFACTS = {"candidates.json", "scene_scores.json", "shot_map.json"}
 
 _KIND_TITLES = {"footage": "Footage", "music": "Music", "generated_image": "Generated Assets"}
 
@@ -46,7 +56,8 @@ def _check_schema_validation(input_dir: Path) -> tuple[dict, dict]:
     for filename, schema_name in ARTIFACT_SCHEMA_MAP.items():
         path = input_dir / filename
         if not path.exists():
-            errors.append(f"{filename}: missing")
+            if filename not in _OPTIONAL_ARTIFACTS:
+                errors.append(f"{filename}: missing")
             continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -62,7 +73,7 @@ def _check_schema_validation(input_dir: Path) -> tuple[dict, dict]:
     check = {
         "name": "schema_validation",
         "pass": not errors,
-        "detail": "; ".join(errors) if errors else f"All {len(ARTIFACT_SCHEMA_MAP)} artifacts present and schema-valid",
+        "detail": "; ".join(errors) if errors else f"All {len(loaded)} present artifact(s) schema-valid",
     }
     return check, loaded
 

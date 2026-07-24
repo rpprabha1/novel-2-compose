@@ -12,6 +12,34 @@ candidate_fetch:
   # Max results requested per beat, per FootageSource.
   max_results_per_source: 5
 
+scene_scoring:
+  # 01_2_scene_scoring samples this many frames per downloaded clip (evenly
+  # spaced) and averages their CLIP similarity to each beat's visual_description.
+  # Mirrors retrieval_verification.frames_per_candidate; kept separate so the
+  # two lanes can be tuned independently.
+  frames_per_clip: 3
+
+downloader_selection:
+  # How many top-ranked clips per beat 07_2_narration_shot_mapping draws shots
+  # from (rank 1..N), so a beat's coverage can alternate across several distinct
+  # real clips instead of one. (Also used by the now-retired-from-flow
+  # shared/downloader_assets.py bridge.)
+  assets_per_beat: 3
+
+shot_extraction:
+  # 07_2_narration_shot_mapping cuts each beat's narration window into shots
+  # this long (seconds), physically extracted from the downloader clips.
+  # null = use the active pacing preset's hold_duration_s.max (config/
+  # editorial_vocab.yaml), keeping shot length consistent with the pacing
+  # vocabulary (4.0s for "standard"). Set a number to override.
+  target_shot_length_s: null
+  # A trailing remainder shorter than this is absorbed into the previous shot
+  # rather than emitted as a sub-second sliver clip.
+  min_shot_length_s: 1.0
+  # Hard ceiling on shots per beat (edit_plan.schema.json caps shots at 12);
+  # if a beat's narration would need more, shot length is stretched to fit.
+  max_shots_per_beat: 12
+
 clip_reranking:
   # Minimum CLIP cosine similarity for a candidate to route to verification (04 -> 05).
   similarity_cutoff: 0.28

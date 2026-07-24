@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "scene_scores.schema.json",
+  "title": "SceneScores",
+  "description": "Output of 01_2_scene_scoring: per-beat CLIP-similarity ranking of the downloader stage's clips. Deliberately carries NO source/origin/url/license for any clip (the downloader lane is source-free by design) - only a neutral clip_id, a file_ref to locate the clip, and its fit score/rank.",
+  "type": "object",
+  "required": ["run_id", "scene_id", "scores_by_beat"],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": { "type": "string" },
+    "scene_id": { "type": "string" },
+    "scores_by_beat": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["beat_id", "ranked_clips"],
+        "additionalProperties": false,
+        "properties": {
+          "beat_id": { "type": "string" },
+          "ranked_clips": {
+            "type": "array",
+            "description": "Clips that yielded at least one usable frame, sorted by score descending, rank 1 = best fit for this beat. Empty if no clip could be frame-sampled.",
+            "items": {
+              "type": "object",
+              "required": ["clip_id", "file_ref", "score", "rank"],
+              "additionalProperties": false,
+              "properties": {
+                "clip_id": { "type": "string" },
+                "file_ref": { "type": "string" },
+                "score": { "type": "number", "minimum": -1, "maximum": 1, "description": "Mean CLIP cosine similarity across the clip's sampled frames vs. the beat's visual_description." },
+                "rank": { "type": "integer", "minimum": 1 },
+                "frames_scored": { "type": "integer", "minimum": 1 }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

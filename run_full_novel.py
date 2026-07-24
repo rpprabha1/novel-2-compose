@@ -5,25 +5,36 @@ Ad-hoc bulk-run driver, not part of any stage's src/ - it plays the
 Coordinator's role (sequencing, staging inputs/outputs between stages,
 applying HITL resolutions) for a run spanning all of a novel's chapters in
 one unattended pass. Per the human's explicit authorization for this
-specific bulk run (2026-07-21/22, see DECISIONS_LOG.md): stages 05
-(close-score tie-break) and 09 (music track selection) apply a documented
-default policy instead of blocking on a live human prompt, and every
-resulting choice is logged for a consolidated after-the-fact summary rather
-than approved stage-by-stage. Stages 06/07 use their CODE-default path
-(agent_call=None), not the AGENT opt-in.
+specific bulk run (2026-07-21/22, see DECISIONS_LOG.md): stage 09 (music
+track selection) applies a documented default policy instead of blocking on a
+live human prompt, and every resulting choice is logged for a consolidated
+after-the-fact summary rather than approved stage-by-stage. Stage 07 uses its
+CODE-default path (agent_call=None), not the AGENT opt-in.
 
-Correct stage order is 02,03,04,05,06,07,09,08,10,11,12,13 - 08 must run
-AFTER 09 because 09's real narration length reconciles 07's visual-only
-edit_plan.json into 08's final timeline.json (see 09's own run.py docstring
-and DECISIONS_LOG.md's 2026-07-18 entries).
+Footage now comes from the SOURCE-FREE DOWNLOADER LANE, not the retired
+Pexels/Pixabay stock lane (2026-07-23 cutover, author override - see
+DECISIONS_LOG.md / ARCHITECTURE.md): per scene, 01_1_downloader is auto-invoked
+once per beat (its own search_query), shared/downloader_manifest.py catalogs
+the new clips, 01_2_scene_scoring CLIP-ranks them per beat, and
+shared/downloader_assets.py bridges that ranking into a source-free
+assets_manifest.json. Stages 03/04/05 (stock fetch/rerank/verify) and 06
+(synthetic fallback) are retired and no longer invoked.
+
+Correct stage order is 02, [01_1 downloader + 01_2 scene_scoring + bridge],
+07,09,08,10,11,12,13,14 - 08 must run AFTER 09 because 09's real narration
+length reconciles 07's visual-only edit_plan.json into 08's final
+timeline.json (see 09's own run.py docstring and DECISIONS_LOG.md's 2026-07-18
+entries).
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import shutil
+import subprocess
 import sys
 import traceback
 from datetime import datetime, timezone
@@ -36,9 +47,10 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(REPO_ROOT))
 
+from shared.downloader_manifest import build_manifest as build_downloader_manifest  # noqa: E402
 from shared.envelopes import StageStatus  # noqa: E402
-from shared.media import generate_mood_visual  # noqa: E402
 from shared.sources import GeneratedMusicSource, JamendoMusicSource, generated_audio_downloader  # noqa: E402
+from shared.text import extract_search_terms  # noqa: E402
 
 
 def _load_env_value(key: str) -> str | None:
@@ -116,6 +128,97 @@ def clean_io(n: int) -> None:
         p.mkdir(parents=True)
 
 
+# --- Downloader lane (footage source since the 2026-07-23 cutover) ------------
+DOWNLOADER_DIR = REPO_ROOT / "stages" / "01_1_downloader"
+DOWNLOADER_OUTPUTS_DIR = DOWNLOADER_DIR / "outputs"
+SCENE_SCORING_DIR = REPO_ROOT / "stages" / "01_2_scene_scoring"
+SHOT_MAPPING_DIR = REPO_ROOT / "stages" / "07_2_narration_shot_mapping"
+_DOWNLOADER_TIMEOUT_S = 900
+
+
+def _load_stage_main(stage_path: Path, mod_name: str):
+    """Load a stage's main() by path (for stages with non-integer numbers like
+    01_2 / 07_2 that can't go through STAGE_NAMES/stage_main())."""
+    spec = importlib.util.spec_from_file_location(mod_name, stage_path / "src" / "run.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.main
+
+
+def _default_downloader_invoke(query: str) -> None:
+    """Auto-invoke the downloader CLI for one query, per downloader_usage.md:
+    the one-shot form `python download.py "<query>"` downloads the top matches
+    into stages/01_1_downloader/outputs/ and prompts once for quality; we feed
+    "3" on stdin (480p, "smaller file" per the usage guide) rather than the
+    Best-quality default - a real run showed "Best quality" pulling down
+    multi-hundred-MB to multi-GB full videos for what becomes a few seconds of
+    beat coverage, since every match is downloaded at full source resolution
+    regardless of how short a clip this pipeline actually needs. Treats the
+    downloader as a documented black box - never reads or imports its own
+    code, only runs the CLI and consumes outputs/.
+
+    encoding="utf-8"/errors="replace" are explicit (not just PYTHONIOENCODING
+    in the child's env): subprocess.run's OWN stdout/stderr reader threads
+    decode using the parent interpreter's locale default (cp1252 on this
+    Windows machine) unless told otherwise, independent of what the child
+    process does with its own encoding - real run hit UnicodeDecodeError in
+    those reader threads on the downloader's non-ASCII output otherwise. The
+    downloads themselves are unaffected either way (this only fixes capturing
+    output text, which isn't even used here).
+    """
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    subprocess.run(
+        [sys.executable, "download.py", query],
+        cwd=str(DOWNLOADER_DIR),
+        input="3\n",
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        env=env,
+        timeout=_DOWNLOADER_TIMEOUT_S,
+    )
+
+
+def download_scene_queries(beats: list[dict], scene_id: str, invoke: Callable[[str], None] | None = None) -> list[str]:
+    """Auto-invoke the downloader once per UNIQUE beat query (each beat's own
+    search_query, falling back to mechanical keyword extraction of its
+    visual_description; de-duplicated in first-seen order, since many beats in
+    a scene legitimately share one query - e.g. a multi-beat speech - and
+    re-invoking the same search repeatedly would be pure waste). This only
+    POPULATES the downloader's shared outputs/ pool; the scene then scores
+    against the WHOLE pool (shared/downloader_manifest built from outputs/),
+    not a per-scene subset.
+
+    Rewritten 2026-07-24 (real bug): the previous version copied only clips a
+    before/after snapshot showed as newly downloaded into a per-scene dir - but
+    the one-shot downloader skips re-downloading a title already present, so on
+    any run where clips already sat in outputs/ (e.g. after a prior stopped
+    run), the "new" set was nearly empty and the whole scene collapsed onto
+    whatever single clip happened to be fresh. Scoring the entire pool
+    ('strictly stick to the downloader's output') is both correct and robust:
+    01_2_scene_scoring ranks per beat, so off-topic clips simply lose.
+
+    `invoke` is injectable so tests never run the real downloader. Returns the
+    ordered list of unique queries actually issued."""
+    invoke = invoke or _default_downloader_invoke
+
+    queries: list[str] = []
+    seen: set[str] = set()
+    for beat in beats:
+        query = (beat.get("search_query") or "").strip() or extract_search_terms(beat["visual_description"])
+        if query not in seen:
+            seen.add(query)
+            queries.append(query)
+
+    for query in queries:
+        try:
+            invoke(query)
+        except Exception as exc:  # noqa: BLE001 - one failed query must not kill the scene
+            log_event({"scene_id": scene_id, "event": "DOWNLOADER_QUERY_FAILED", "query": query, "error": str(exc)})
+    return queries
+
+
 def log_event(event: dict) -> None:
     event["ts"] = datetime.now(timezone.utc).isoformat()
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -133,36 +236,6 @@ def parse_first_token(option: str) -> str:
     """Options are formatted as '<id> (...)' - the id is always the first
     whitespace-delimited token (see Stage 05/09's NeedsInputItem construction)."""
     return option.split(" ", 1)[0]
-
-
-def resolve_close_score_tiebreaks(run_config: dict, out_dir: Path, decisions_log: list) -> "StageResponse":
-    main05 = stage_main(5)
-    resp = main05(stage_dir(5) / "inputs", out_dir, run_config)
-    if resp.status != StageStatus.NEEDS_INPUT:
-        return resp
-    hitl_decisions: dict[str, str] = {}
-    for item in resp.needs_input:
-        if item.reason_code != "close_score_tiebreak":
-            continue
-        m = re.match(r"Beat (\S+):", item.question)
-        beat_id = m.group(1) if m else None
-        if not beat_id or not item.options:
-            continue
-        top_candidate_id = parse_first_token(item.options[0])
-        hitl_decisions[beat_id] = top_candidate_id
-        decisions_log.append(
-            {
-                "stage": "05_retrieval_verification",
-                "decision_point": "close_score_tiebreak",
-                "beat_id": beat_id,
-                "choice": top_candidate_id,
-                "options": item.options,
-                "policy": "autonomous default: highest verified CLIP score",
-            }
-        )
-    if not hitl_decisions:
-        return resp
-    return main05(stage_dir(5) / "inputs", out_dir, run_config, hitl_decisions=hitl_decisions)
 
 
 def _single_scene_wide_cue_agent_call(beats_path: Path):
@@ -381,123 +454,6 @@ def resolve_music_stage(run_config: dict, out_dir: Path, decisions_log: list) ->
     return resp
 
 
-def merge_assets_manifests(paths: list[Path], run_id: str, scene_id: str) -> dict:
-    assets: list = []
-    for p in paths:
-        if p.exists():
-            data = json.loads(p.read_text(encoding="utf-8"))
-            assets.extend(data.get("assets", []))
-    return {"run_id": run_id, "scene_id": scene_id, "assets": assets}
-
-
-def extend_undersized_assets_for_narration(
-    fallback_items: list,
-    beats_by_id: dict,
-    audio_mix: dict,
-    merged_assets: dict,
-    edit_plan: dict,
-    run_id: str,
-    decisions_log: list,
-) -> bool:
-    """Stage 08 flags asset_too_short_for_narration and refuses to build ANY
-    timeline at all rather than proceed partially (CLAUDE.md's "no match is a
-    routed outcome" principle, enforced as a hard block here) - real footage
-    clips are typically a few seconds long, but this pipeline's beats (~4
-    sentences of narration each) routinely need 20-40s+ of coverage. Rather
-    than loop/stretch real footage (explicitly forbidden), regenerate a
-    fresh, sufficiently-long mood visual for exactly the affected beat(s) -
-    the same fix already applied to Stage 06's own fallback lane (see
-    config/fallback_visual.yaml's min_duration_s comment) for beats with no
-    matched footage at all, extended here to beats that DID get real footage
-    but not enough of it. Mutates merged_assets/edit_plan in place. Returns
-    True if anything was changed (i.e. Stage 08 is worth retrying).
-    """
-    narration_duration_by_beat = {s["beat_id"]: s["duration_s"] for s in audio_mix.get("narration_stems", [])}
-    fallback_visual_cfg = yaml.safe_load((REPO_ROOT / "config" / "fallback_visual.yaml").read_text(encoding="utf-8"))
-    videos_dir = REPO_ROOT / f"shared/runs/{run_id}/cache/generated_videos"
-    beats_by_plan_id = {b["beat_id"]: b for b in edit_plan.get("beats", [])}
-    color_map = fallback_visual_cfg.get("mood_color_map", {})
-    changed = False
-
-    for item in fallback_items:
-        if item.reason_code != "asset_too_short_for_narration":
-            continue
-        beat_id = item.item_id
-        needed = narration_duration_by_beat.get(beat_id)
-        beat = beats_by_id.get(beat_id)
-        plan_beat = beats_by_plan_id.get(beat_id)
-        if needed is None or beat is None or plan_beat is None:
-            continue
-
-        duration_s = max(needed + 2.0, fallback_visual_cfg["min_duration_s"])
-        asset_id = f"{beat_id}_narration_extended"
-        video_path = videos_dir / f"{beat_id}_narration_extended.mp4"
-        color1, color2 = fallback_visual_cfg["default_color1"], fallback_visual_cfg["default_color2"]
-        for tag in beat.get("mood_tags", []):
-            if tag in color_map:
-                color1, color2 = color_map[tag]
-                break
-        generate_mood_visual(
-            dest_path=video_path,
-            duration_s=duration_s,
-            width=fallback_visual_cfg["width"],
-            height=fallback_visual_cfg["height"],
-            fps=fallback_visual_cfg["fps"],
-            color1=color1,
-            color2=color2,
-            zoom_end=fallback_visual_cfg.get("zoom_end", 1.12),
-        )
-
-        merged_assets["assets"] = [a for a in merged_assets["assets"] if a["beat_id"] != beat_id]
-        merged_assets["assets"].append(
-            {
-                "beat_id": beat_id,
-                "asset_id": asset_id,
-                "origin": "generated_fallback",
-                "file_ref": f"shared/runs/{run_id}/cache/generated_videos/{beat_id}_narration_extended.mp4",
-                "duration_s": duration_s,
-                "license": "Generated (mood visual) - no license required",
-                "attribution": {"source": "generated", "creator_required": False},
-            }
-        )
-
-        plan_beat["asset_id"] = asset_id
-        plan_beat["shots"] = [
-            {"shot_id": f"{beat_id}_s1_extended", "in_s": 0.0, "out_s": duration_s, "hold_duration_s": min(needed, duration_s)}
-        ]
-        changed = True
-        decisions_log.append(
-            {
-                "stage": "08_timeline_builder",
-                "decision_point": "asset_too_short_for_narration",
-                "beat_id": beat_id,
-                "policy": f"regenerated a {duration_s:.1f}s text card (needed {needed:.1f}s) replacing the too-short real footage, "
-                "matching the existing text_card.yaml min_duration_s precedent for the no-footage-at-all case",
-            }
-        )
-    return changed
-
-
-def clear_fallback_visual_cache(run_id: str) -> None:
-    """Stage 06 caches each beat's generated fallback clip by beat_id
-    filename (`if not video_path.exists(): render(...)`) - reasonable for a
-    single run, but this orchestrator re-runs the same scene_id multiple
-    times across smoke-test/config-change attempts under one shared run_id.
-    Without this, a stale clip rendered under the OLD design (e.g. the
-    on-screen text card retired 2026-07-23) gets silently reused after a
-    visual-design fix, since the beat_id filename hasn't changed even though
-    what should be rendered at that path has - caught for real: after
-    replacing text cards with mood-visual gradients, Stage 6 reported
-    "COMPLETE...Generated 25 fallback asset(s)" but frame-extraction showed
-    the OLD text card, because the cached file predated the fix and was
-    never regenerated. See DECISIONS_LOG.md. Cleared once per scene, before
-    that scene's own Stage 06 call.
-    """
-    d = REPO_ROOT / f"shared/runs/{run_id}/cache/generated_videos"
-    if d.exists():
-        shutil.rmtree(d)
-
-
 def clear_audio_cache(run_id: str) -> None:
     """Stage 09 caches narration by beat_id filename and cue tracks by cue_id
     filename (`if not path.exists(): synthesize`) - a reasonable design for a
@@ -550,82 +506,38 @@ def run_scene(scene: dict, run_config: dict, reuse_beats: Path | None = None) ->
             return result
         beats_path = stage_dir(2) / "outputs" / "beats.json"
 
-    # --- Stage 03 ---
-    clean_io(3)
-    shutil.copy(beats_path, stage_dir(3) / "inputs" / "beats.json")
-    resp03 = stage_main(3)(stage_dir(3) / "inputs", stage_dir(3) / "outputs", run_config)
-    record(3, resp03)
-    if resp03.status not in (StageStatus.COMPLETE, StageStatus.NEEDS_INPUT):
-        result["halted_at"] = 3
-        return result
-    candidates_path = stage_dir(3) / "outputs" / "candidates.json"
-    if not candidates_path.exists():
-        result["halted_at"] = 3
-        return result
-
-    # --- Stage 04 ---
-    clean_io(4)
-    shutil.copy(beats_path, stage_dir(4) / "inputs" / "beats.json")
-    shutil.copy(candidates_path, stage_dir(4) / "inputs" / "candidates.json")
-    resp04 = stage_main(4)(stage_dir(4) / "inputs", stage_dir(4) / "outputs", run_config)
-    record(4, resp04)
-    if resp04.status != StageStatus.COMPLETE:
-        result["halted_at"] = 4
-        return result
-    ranked_candidates_path = stage_dir(4) / "outputs" / "candidates.json"
-
-    # --- Stage 05 (autonomous tie-break policy) ---
-    clean_io(5)
-    shutil.copy(beats_path, stage_dir(5) / "inputs" / "beats.json")
-    shutil.copy(ranked_candidates_path, stage_dir(5) / "inputs" / "candidates.json")
-    resp05 = resolve_close_score_tiebreaks(run_config, stage_dir(5) / "outputs", decisions)
-    record(5, resp05)
-    assets_05_path = stage_dir(5) / "outputs" / "assets_manifest.json"
-
-    # --- Stage 06 (CODE-default; always invoked, no-ops if nothing routed) ---
-    clean_io(6)
-    clear_fallback_visual_cache(run_config["run_id"])
-    shutil.copy(beats_path, stage_dir(6) / "inputs" / "beats.json")
-    shutil.copy(ranked_candidates_path, stage_dir(6) / "inputs" / "candidates.json")
-    resp06 = stage_main(6)(stage_dir(6) / "inputs", stage_dir(6) / "outputs", run_config)
-    record(6, resp06)
-    if resp06.status not in (StageStatus.COMPLETE,):
-        result["halted_at"] = 6
-        return result
-    assets_06_path = stage_dir(6) / "outputs" / "assets_manifest.json"
-
+    # --- Downloader lane (footage source; 2026-07-23 cutover + 2026-07-24
+    # shot-extraction re-architecture - see ARCHITECTURE.md / DECISIONS_LOG.md).
+    # Auto-invoke 01_1_downloader once per unique beat query to populate the
+    # shared outputs/ pool, then catalog the WHOLE pool (not a per-scene
+    # snapshot) and CLIP-rank it per beat in 01_2_scene_scoring. Source-free. ---
     beats_data = json.loads(beats_path.read_text(encoding="utf-8"))
-    merged_assets = merge_assets_manifests([assets_05_path, assets_06_path], run_config["run_id"], beats_data.get("scene_id", scene_id))
-    if not merged_assets["assets"]:
-        result["halted_at"] = "05/06 (no assets at all)"
+    scene_beats = beats_data.get("beats", [])
+
+    download_scene_queries(scene_beats, scene_id)
+    downloader_manifest = build_downloader_manifest(DOWNLOADER_OUTPUTS_DIR)
+    log_event({"scene_id": scene_id, "event": "DOWNLOADER_CLIPS", "clip_count": downloader_manifest.get("clip_count", 0)})
+    if not downloader_manifest.get("clips"):
+        result["halted_at"] = "01_1 (no clips in the downloader outputs pool)"
         return result
 
-    # --- Stage 07 (CODE-default) ---
-    clean_io(7)
-    shutil.copy(beats_path, stage_dir(7) / "inputs" / "beats.json")
-    (stage_dir(7) / "inputs" / "assets_manifest.json").write_text(json.dumps(merged_assets, indent=2), encoding="utf-8")
-    resp07 = stage_main(7)(stage_dir(7) / "inputs", stage_dir(7) / "outputs", run_config)
-    record(7, resp07)
-    if resp07.status == StageStatus.NEEDS_INPUT:
-        for item in resp07.needs_input:
-            decisions.append(
-                {
-                    "stage": "07_editorial_direction",
-                    "decision_point": item.reason_code,
-                    "detail": item.question,
-                    "policy": "autonomous default: approve as-is (matches this run's established precedent for runtime_drift/asset_too_short)",
-                }
-            )
-    if resp07.status not in (StageStatus.COMPLETE, StageStatus.NEEDS_INPUT):
-        result["halted_at"] = 7
+    # --- Stage 01_2 scene_scoring (CLIP-rank the pool's clips per beat) ---
+    ss_inputs, ss_outputs = SCENE_SCORING_DIR / "inputs", SCENE_SCORING_DIR / "outputs"
+    for d in (ss_inputs, ss_outputs):
+        if d.exists():
+            shutil.rmtree(d)
+        d.mkdir(parents=True)
+    shutil.copy(beats_path, ss_inputs / "beats.json")
+    (ss_inputs / "downloader_manifest.json").write_text(json.dumps(downloader_manifest, indent=2), encoding="utf-8")
+    resp_ss = _load_stage_main(SCENE_SCORING_DIR, "_orch_stage_01_2")(ss_inputs, ss_outputs, run_config)
+    record("01_2", resp_ss)
+    scene_scores_path = ss_outputs / "scene_scores.json"
+    if resp_ss.status != StageStatus.COMPLETE or not scene_scores_path.exists():
+        result["halted_at"] = "01_2"
         return result
-    edit_plan_path = stage_dir(7) / "outputs" / "edit_plan.json"
-    if not edit_plan_path.exists():
-        result["halted_at"] = 7
-        return result
-    edit_plan = json.loads(edit_plan_path.read_text(encoding="utf-8"))
 
-    # --- Stage 09 (BEFORE 08 - see module docstring) ---
+    # --- Stage 09 audio (BEFORE shot mapping + timeline: narration length is
+    # authoritative, and 09 reads only beats + scene text, no shot plan). ---
     clean_io(9)
     clear_audio_cache(run_config["run_id"])
     shutil.copy(beats_path, stage_dir(9) / "inputs" / "beats.json")
@@ -636,25 +548,39 @@ def run_scene(scene: dict, run_config: dict, reuse_beats: Path | None = None) ->
     scene_mix_path = stage_dir(9) / "outputs" / "scene_mix.wav"
     music_cue_intent_path = stage_dir(9) / "outputs" / "music_cue_intent.json"
 
-    # --- Stage 08 (with audio_mix.json reconciliation if 09 produced one) ---
+    # --- Stage 07_2 narration_shot_mapping: physically extract short shots from
+    # each beat's top-ranked downloader clips, covering its narration duration.
+    # Produces the edit_plan + source-free assets_manifest the rest of the
+    # pipeline consumes - superseding the retired-from-flow Stage 07 editorial
+    # and the downloader_assets bridge (both kept in-tree, no longer invoked). ---
+    sm_inputs, sm_outputs = SHOT_MAPPING_DIR / "inputs", SHOT_MAPPING_DIR / "outputs"
+    for d in (sm_inputs, sm_outputs):
+        if d.exists():
+            shutil.rmtree(d)
+        d.mkdir(parents=True)
+    shutil.copy(beats_path, sm_inputs / "beats.json")
+    shutil.copy(scene_scores_path, sm_inputs / "scene_scores.json")
+    (sm_inputs / "downloader_manifest.json").write_text(json.dumps(downloader_manifest, indent=2), encoding="utf-8")
+    if audio_mix_path.exists():
+        shutil.copy(audio_mix_path, sm_inputs / "audio_mix.json")
+    resp_sm = _load_stage_main(SHOT_MAPPING_DIR, "_orch_stage_07_2")(sm_inputs, sm_outputs, run_config)
+    record("07_2", resp_sm)
+    edit_plan_path = sm_outputs / "edit_plan.json"
+    assets_manifest_path = sm_outputs / "assets_manifest.json"
+    shot_map_path = sm_outputs / "shot_map.json"
+    if resp_sm.status not in (StageStatus.COMPLETE, StageStatus.FALLBACK_ROUTED) or not edit_plan_path.exists():
+        result["halted_at"] = "07_2"
+        return result
+    merged_assets = json.loads(assets_manifest_path.read_text(encoding="utf-8"))
+
+    # --- Stage 08 timeline. 07_2 already mapped shots onto narration, so
+    # audio_mix is deliberately NOT passed - 08 lays the pre-extracted shots out
+    # as-is (hard cuts, video length == narration length) rather than re-tiling. ---
     clean_io(8)
     shutil.copy(edit_plan_path, stage_dir(8) / "inputs" / "edit_plan.json")
-    (stage_dir(8) / "inputs" / "assets_manifest.json").write_text(json.dumps(merged_assets, indent=2), encoding="utf-8")
-    if audio_mix_path.exists():
-        shutil.copy(audio_mix_path, stage_dir(8) / "inputs" / "audio_mix.json")
+    shutil.copy(assets_manifest_path, stage_dir(8) / "inputs" / "assets_manifest.json")
     resp08 = stage_main(8)(stage_dir(8) / "inputs", stage_dir(8) / "outputs", run_config)
     record(8, resp08)
-    if resp08.status == StageStatus.FALLBACK_ROUTED and audio_mix_path.exists():
-        audio_mix = json.loads(audio_mix_path.read_text(encoding="utf-8"))
-        beats_by_id = {b["beat_id"]: b for b in beats_data.get("beats", [])}
-        changed = extend_undersized_assets_for_narration(
-            resp08.fallback_routed, beats_by_id, audio_mix, merged_assets, edit_plan, run_config["run_id"], decisions
-        )
-        if changed:
-            (stage_dir(8) / "inputs" / "assets_manifest.json").write_text(json.dumps(merged_assets, indent=2), encoding="utf-8")
-            (stage_dir(8) / "inputs" / "edit_plan.json").write_text(json.dumps(edit_plan, indent=2), encoding="utf-8")
-            resp08 = stage_main(8)(stage_dir(8) / "inputs", stage_dir(8) / "outputs", run_config)
-            record(8, resp08)
     if resp08.status not in (StageStatus.COMPLETE, StageStatus.FALLBACK_ROUTED):
         result["halted_at"] = 8
         return result
@@ -695,13 +621,15 @@ def run_scene(scene: dict, run_config: dict, reuse_beats: Path | None = None) ->
     clean_io(12)
     for name, path in [
         ("beats.json", beats_path),
-        ("candidates.json", ranked_candidates_path),
+        ("scene_scores.json", scene_scores_path),
         ("edit_plan.json", edit_plan_path),
         ("timeline.json", timeline_path),
         ("final.mp4", final_mp4_path),
     ]:
         shutil.copy(path, stage_dir(12) / "inputs" / name)
     (stage_dir(12) / "inputs" / "assets_manifest.json").write_text(json.dumps(merged_assets, indent=2), encoding="utf-8")
+    if shot_map_path.exists():
+        shutil.copy(shot_map_path, stage_dir(12) / "inputs" / "shot_map.json")
     if music_cue_intent_path.exists():
         shutil.copy(music_cue_intent_path, stage_dir(12) / "inputs" / "music_cue_intent.json")
     if audio_mix_path.exists():
@@ -728,12 +656,21 @@ def run_scene(scene: dict, run_config: dict, reuse_beats: Path | None = None) ->
     record(13, resp13)
     final_pixel_path = stage_dir(13) / "outputs" / "final_pixel_art.mp4"
 
-    # --- Stage 14 (anime style - the author's chosen primary deliverable) ---
-    clean_io(14)
-    shutil.copy(final_mp4_path, stage_dir(14) / "inputs" / "final.mp4")
-    resp14 = stage_main(14)(stage_dir(14) / "inputs", stage_dir(14) / "outputs", run_config)
-    record(14, resp14)
-    final_anime_path = stage_dir(14) / "outputs" / "final_anime.mp4"
+    # --- Stage 14 (anime style - the author's chosen primary deliverable).
+    # SKIP_STAGE_14 env var: an ad-hoc, per-run opt-out (not an architecture
+    # change) - the CPU-only GAN pass was calibrated against much shorter test
+    # chapters; a real full-chapter run (837.6s here) needs an estimated
+    # 4-5+ hours (stylize_fps=6 at ~2-3s/frame + the Real-ESRGAN upscale
+    # pass), and the author asked to skip it for this particular run. ---
+    if os.environ.get("SKIP_STAGE_14", "").strip().lower() in ("1", "true", "yes"):
+        log_event({"scene_id": scene_id, "stage": 14, "status": "SKIPPED", "summary": "Skipped via SKIP_STAGE_14 for this run."})
+        final_anime_path = stage_dir(14) / "outputs" / "final_anime.mp4"  # won't exist
+    else:
+        clean_io(14)
+        shutil.copy(final_mp4_path, stage_dir(14) / "inputs" / "final.mp4")
+        resp14 = stage_main(14)(stage_dir(14) / "inputs", stage_dir(14) / "outputs", run_config)
+        record(14, resp14)
+        final_anime_path = stage_dir(14) / "outputs" / "final_anime.mp4"
 
     # --- Archive this scene's final artifacts before the next scene's clean_io() wipes them ---
     archive_dir = REPO_ROOT / f"shared/runs/{run_config['run_id']}/chapter_outputs/{scene_id}"

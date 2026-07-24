@@ -168,6 +168,71 @@ def test_reused_shot_id_with_changed_source_is_not_stale_cached(tmp_path):
     assert abs(duration - 4.0) < 0.1  # reflects the new 4s blue clip, not the stale 2s red one
 
 
+def test_many_hard_cut_clips_use_stream_copy_no_growing_reencode(tmp_path):
+    # Regression test for the 2026-07-24 O(n^2) fix (see ARCHITECTURE.md
+    # change log): a long run of hard-cut-connected clips must be joined via
+    # concat_stream_copy (a single lossless pass), never a per-boundary
+    # re-encoding growing chain - verified two ways: (1) no bridge_*.mp4 file
+    # is ever created (nothing here needs a real transition blend), and (2)
+    # the final duration is the exact sum of all clip durations.
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    n = 12
+    clips = []
+    for i in range(n):
+        clip_path = tmp_path / "assets" / f"c{i}.mp4"
+        _make_color_clip(clip_path, "red" if i % 2 == 0 else "blue", "320x240", 1.0)
+        clips.append({
+            "shot_id": f"s{i}", "file_ref": str(clip_path), "source_in_s": 0.0, "source_out_s": 1.0,
+            "timeline_start_s": float(i), "timeline_end_s": float(i + 1),
+        })
+    _write_timeline(input_dir, clips)
+    _make_audio(input_dir / "scene_mix.wav", float(n))
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG, render_cfg=RENDER_CFG, thresholds=THRESHOLDS)
+
+    assert response.status.value == "COMPLETE"
+    duration = run.probe_duration_s(output_dir / "final.mp4")
+    assert abs(duration - float(n)) < 0.15
+
+    cache_dir = REPO_ROOT / "shared" / "runs" / "test_run_11" / "cache" / "assembly"
+    bridges = list(cache_dir.glob("bridge_*.mp4"))
+    combined = list(cache_dir.glob("combined_*.mp4"))  # old growing-chain filename pattern
+    assert bridges == []  # no real transitions anywhere -> nothing needed blending
+    assert combined == []  # the old O(n^2) code path must be entirely gone
+
+
+def test_consecutive_real_transitions_both_honored(tmp_path):
+    # Regression test for a real bug caught while implementing the O(n^2)
+    # fix: a naive "consume transitions in pairs" rewrite silently dropped the
+    # SECOND clip's own transition_out whenever two real transitions occurred
+    # back-to-back (e.g. a single-shot beat that both fades in from the
+    # previous beat and immediately fades out to the next one). Both
+    # crossfades here must be honored - final duration reflects BOTH borrowed
+    # overlaps, not just the first.
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    clip_a = tmp_path / "assets" / "a.mp4"
+    clip_b = tmp_path / "assets" / "b.mp4"
+    clip_c = tmp_path / "assets" / "c.mp4"
+    _make_color_clip(clip_a, "red", "320x240", 3.0)
+    _make_color_clip(clip_b, "green", "320x240", 2.0)  # single-shot "beat" - fades in AND out
+    _make_color_clip(clip_c, "blue", "320x240", 3.0)
+    audio_path = input_dir / "scene_mix.wav"
+
+    clips = [
+        {"shot_id": "s1", "file_ref": str(clip_a), "source_in_s": 0.0, "source_out_s": 3.0, "timeline_start_s": 0.0, "timeline_end_s": 3.0, "transition_out": {"type": "crossfade", "duration_s": 0.5}},
+        {"shot_id": "s2", "file_ref": str(clip_b), "source_in_s": 0.0, "source_out_s": 2.0, "timeline_start_s": 3.0, "timeline_end_s": 5.0, "transition_out": {"type": "crossfade", "duration_s": 0.5}},
+        {"shot_id": "s3", "file_ref": str(clip_c), "source_in_s": 0.0, "source_out_s": 3.0, "timeline_start_s": 5.0, "timeline_end_s": 8.0},
+    ]
+    _write_timeline(input_dir, clips)
+    _make_audio(audio_path, 7.0)  # 3.0 + 2.0 + 3.0 - 0.5 - 0.5 = 7.0
+
+    response = run.main(input_dir, output_dir, RUN_CONFIG, render_cfg=RENDER_CFG, thresholds=THRESHOLDS)
+
+    assert response.status.value == "COMPLETE"
+    duration = run.probe_duration_s(output_dir / "final.mp4")
+    assert abs(duration - 7.0) < 0.15  # both crossfades' borrowed time reflected, not just one
+
+
 def test_missing_clip_file_fails(tmp_path):
     input_dir, output_dir = tmp_path / "in", tmp_path / "out"
     clips = [

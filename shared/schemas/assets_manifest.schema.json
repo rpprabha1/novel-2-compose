@@ -17,7 +17,7 @@
         "properties": {
           "beat_id": { "type": "string" },
           "asset_id": { "type": "string" },
-          "origin": { "type": "string", "enum": ["retrieved_verified", "generated_fallback"] },
+          "origin": { "type": "string", "enum": ["retrieved_verified", "generated_fallback", "downloader"] },
           "file_ref": { "type": "string" },
           "duration_s": { "type": "number", "exclusiveMinimum": 0 },
           "confidence": { "type": "number", "minimum": 0, "maximum": 1 },

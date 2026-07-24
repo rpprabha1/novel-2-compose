@@ -126,8 +126,48 @@ Schema: `shared/schemas/candidates.schema.json`. Output of `03_candidate_fetch`;
 }
 ```
 
+## Scene Scores
+Schema: `shared/schemas/scene_scores.schema.json`. Output of `01_2_scene_scoring`. Per-beat CLIP-similarity ranking of the `01_1_downloader` lane's clips. **Source-free by design** — each clip entry carries only a neutral `clip_id`, a `file_ref`, and its `score`/`rank`; no `source`/`origin`/`url`/`license`/`creator` (the downloader lane attaches no source anywhere, per the author's instruction). "Ranked scores only": every scored clip appears, no winner is selected and nothing is routed.
+
+```json
+{
+  "run_id": "crow_demo",
+  "scene_id": "crow_sc1",
+  "scores_by_beat": [
+    {
+      "beat_id": "b001",
+      "ranked_clips": [
+        { "clip_id": "clip_001", "file_ref": "stages/01_1_downloader/outputs/clip_001.mp4", "score": 0.3313, "rank": 1, "frames_scored": 3 },
+        { "clip_id": "clip_003", "file_ref": "stages/01_1_downloader/outputs/clip_003.mp4", "score": 0.3133, "rank": 2, "frames_scored": 3 },
+        { "clip_id": "clip_002", "file_ref": "stages/01_1_downloader/outputs/clip_002.mp4", "score": 0.2546, "rank": 3, "frames_scored": 3 }
+      ]
+    }
+  ]
+}
+```
+
+## Shot Map
+Schema: `shared/schemas/shot_map.schema.json`. Output of `07_2_narration_shot_mapping` (added 2026-07-24). The explicit **narration-to-shot mapping**: for each beat, the ordered short shots physically extracted from the downloader lane's clips that together cover that beat's narration. **Source-free** like the rest of the downloader lane — a shot's source is identified only by a neutral `clip_id` + repo-relative `file_ref`. Each shot records the source window (`source_in_s`/`source_out_s`), the extracted short clip (`extracted_file_ref`, `duration_s` = its true ffprobed length), and the narration span it covers (`narration_start_s`/`narration_end_s`). Alongside it the stage writes an `assets_manifest.json` (each extracted shot an asset, `origin: "downloader"`) and an `edit_plan.json` that `08_timeline_builder` consumes directly.
+
+```json
+{
+  "run_id": "animal_farm_ch1_2026_07_21",
+  "scene_id": "ch1_sc1",
+  "beats": [
+    {
+      "beat_id": "ch1_sc1_b001",
+      "narration_duration_s": 11.0,
+      "shots": [
+        { "shot_id": "ch1_sc1_b001_s01", "asset_id": "ch1_sc1_b001__clip_003__s01", "source_clip_id": "clip_003", "source_file_ref": "stages/01_1_downloader/outputs/clip_003.mp4", "source_in_s": 0.0, "source_out_s": 4.0, "extracted_file_ref": "shared/runs/animal_farm_ch1_2026_07_21/cache/shots/ch1_sc1_b001_s01.mp4", "duration_s": 4.0, "narration_start_s": 0.0, "narration_end_s": 4.0 },
+        { "shot_id": "ch1_sc1_b001_s02", "asset_id": "ch1_sc1_b001__clip_002__s02", "source_clip_id": "clip_002", "source_file_ref": "stages/01_1_downloader/outputs/clip_002.mp4", "source_in_s": 0.0, "source_out_s": 4.0, "extracted_file_ref": "shared/runs/animal_farm_ch1_2026_07_21/cache/shots/ch1_sc1_b001_s02.mp4", "duration_s": 4.0, "narration_start_s": 4.0, "narration_end_s": 8.0 }
+      ]
+    }
+  ]
+}
+```
+
 ## Assets Manifest
-Schema: `shared/schemas/assets_manifest.schema.json`. Verified asset(s) per beat, from `05_retrieval_verification` or `06_fallback_generation`. A `beat_id` may appear more than once — one entry per `rank` (1 = the winning/primary asset; 2..N are additional verified candidates for the same beat, retained per `config/thresholds.yaml`'s `retrieval_verification.assets_per_beat` so `07_editorial_direction` can cut between distinct real clips instead of only ever having one asset available). `rank` is optional; its absence means rank 1 (pre-2026-07-17 producers of this file, e.g. `06_fallback_generation`, are unaffected).
+Schema: `shared/schemas/assets_manifest.schema.json`. Verified asset(s) per beat. Producers: `05_retrieval_verification` (`origin: retrieved_verified`), `06_fallback_generation` (`origin: generated_fallback` — retired 2026-07-23, see ARCHITECTURE.md change log), and — since the 2026-07-23 downloader-lane cutover — `shared/downloader_assets.py`, which bridges `01_2_scene_scoring`'s `scene_scores.json` into this shape (`origin: downloader`). A `beat_id` may appear more than once — one entry per `rank` (1 = the winning/primary asset; 2..N are additional candidates for the same beat, retained per `config/thresholds.yaml`'s `retrieval_verification.assets_per_beat` (stock lane) or `downloader_selection.assets_per_beat` (downloader lane) so `07_editorial_direction` can cut between distinct real clips instead of only ever having one asset available). `rank` is optional; its absence means rank 1. **`origin: downloader` entries are deliberately source-free** (consistent with the downloader lane): `license` is a neutral placeholder and `attribution.source` is the lane label `"downloader"` with `creator_required: false` — no platform/url/channel/creator is ever recorded.
 
 ```json
 {

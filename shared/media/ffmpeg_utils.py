@@ -154,3 +154,36 @@ def generate_mood_visual(
         still_path.unlink(missing_ok=True)
 
 
+def trim_clip(src_path: Path, dest_path: Path, start_s: float, duration_s: float) -> None:
+    """Extract a [start_s, start_s + duration_s] segment of *src_path* as its
+    own video file. Used by 07_2_narration_shot_mapping to cut short shots out
+    of the downloader lane's (often long) source clips.
+
+    Re-encodes rather than stream-copies: source clips come from arbitrary
+    origins with arbitrary codecs/keyframe spacing, and a stream copy would cut
+    only at keyframes (wrong start/duration) or fail across containers. Audio is
+    dropped (-an): these shots carry no audio - narration + music are mixed
+    separately in 09 and muxed in 11. `-ss` is placed before `-i` for fast input
+    seeking; the caller re-probes the written file for its true duration rather
+    than trusting the requested one (a seek can land on the nearest frame)."""
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        [
+            "ffmpeg", "-y",
+            "-ss", f"{start_s:.4f}",
+            "-i", str(src_path),
+            "-t", f"{duration_s:.4f}",
+            "-an",
+            "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+            str(dest_path),
+        ],
+        capture_output=True, text=True,
+    )
+    # ffmpeg can exit 0 (or leave a 0-byte file) on an undecodable input while
+    # writing nothing usable ("Nothing was written into output file") - treat an
+    # empty/missing output as a failure so the caller can drop that source clip.
+    if result.returncode != 0 or not dest_path.exists() or dest_path.stat().st_size == 0:
+        dest_path.unlink(missing_ok=True)
+        raise FFmpegError(f"ffmpeg trim failed for {src_path} [{start_s:.2f}s +{duration_s:.2f}s]: {result.stderr}")
+
+

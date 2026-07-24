@@ -139,6 +139,58 @@ def test_resolve_music_stage_freezes_cue_sheet_once_valid(monkeypatch, tmp_path)
     assert frozen_cues_seen == [real_cues]
 
 
+def test_download_scene_queries_dedups_and_issues_unique(tmp_path):
+    """download_scene_queries (2026-07-24) invokes the downloader once per
+    UNIQUE beat query (many beats legitimately share one, e.g. a multi-beat
+    speech), populating the shared outputs/ pool; the scene later scores the
+    WHOLE pool, so there's no fragile per-scene snapshot. Real downloader is
+    never run; `invoke` is injected."""
+    invoked: list[str] = []
+    beats = [
+        {"beat_id": "b1", "visual_description": "x", "search_query": "pig speaking barn"},
+        {"beat_id": "b2", "visual_description": "y", "search_query": "pig speaking barn"},  # dup
+        {"beat_id": "b3", "visual_description": "z", "search_query": "animals fleeing barn"},
+    ]
+    queries = orch.download_scene_queries(beats, "sc1", invoke=lambda q: invoked.append(q))
+
+    assert queries == ["pig speaking barn", "animals fleeing barn"]
+    assert invoked == ["pig speaking barn", "animals fleeing barn"]  # dup issued only once
+
+
+def test_download_scene_queries_falls_back_to_extracted_terms(monkeypatch):
+    """A beat with no search_query drives the downloader with mechanically
+    extracted keywords from its visual_description (same fallback Stage 03 used)."""
+    queries: list[str] = []
+    monkeypatch.setattr(orch, "_default_downloader_invoke", lambda q: queries.append(q))
+
+    beats = [{"beat_id": "b1", "visual_description": "A woman climbs a narrow attic staircase."}]
+    orch.download_scene_queries(beats, "sc1")  # default invoke -> monkeypatched
+
+    assert len(queries) == 1
+    assert queries[0].strip()  # non-empty derived query
+    assert "attic" in queries[0]
+
+
+def test_download_scene_queries_survives_a_failed_query(monkeypatch):
+    """One query raising (e.g. the downloader errored) is logged and skipped,
+    not fatal - the scene's other queries still run."""
+    events: list[dict] = []
+    monkeypatch.setattr(orch, "log_event", lambda e: events.append(e))
+
+    def flaky_invoke(query: str) -> None:
+        if query == "boom":
+            raise RuntimeError("downloader failed")
+
+    beats = [
+        {"beat_id": "b1", "visual_description": "x", "search_query": "boom"},
+        {"beat_id": "b2", "visual_description": "y", "search_query": "good clip"},
+    ]
+    queries = orch.download_scene_queries(beats, "sc1", invoke=flaky_invoke)
+
+    assert queries == ["boom", "good clip"]  # both attempted
+    assert any(e.get("event") == "DOWNLOADER_QUERY_FAILED" for e in events)
+
+
 def test_resolve_music_stage_still_handles_cues_incomplete(monkeypatch, tmp_path):
     """Existing behavior (pre-dating this fix) must survive unchanged: a
     structurally-invalid cue-sheet is retried by regenerating fresh, not by

@@ -1,6 +1,6 @@
 # Downloader — Usage Guide
 
-A small command-line tool that searches YouTube by description and downloads
+A small command-line tool that searches Source by description and downloads
 clips. This guide covers how to run it and where the results land. Nothing
 here describes how it works internally.
 
@@ -75,8 +75,30 @@ Press Enter to accept the default (Best quality).
   ```
   stages/01_1_downloader/outputs/
   ```
-- Each file is named after the video's title.
+- Each file is named after the clip's title.
 - To send downloads somewhere else, use `/dir PATH` in interactive mode.
+- This `outputs/` folder is what the rest of the pipeline reads from — the
+  downloader acts as a pipeline stage that feeds its clips forward.
+
+---
+
+## Producing the pipeline manifest
+
+Downstream stages don't read the raw folder directly; they consume a small
+metadata manifest that lists each clip with its technical details (duration,
+dimensions, codec, size) and nothing about where it came from. After a
+download, generate or refresh it with:
+
+```
+python -m shared.downloader_manifest
+```
+
+- Writes `downloader_manifest.json` into `stages/01_1_downloader/outputs/`.
+- Only reads the clips already in that folder — run it any time to rebuild.
+- Deliberately **source-free**: records only a neutral clip id, a file
+  reference, and technical specs — never where a clip came from.
+- The scoring stage `01_2_scene_scoring` reads this manifest to rank the
+  clips against the scene.
 
 ---
 
@@ -98,5 +120,5 @@ affects how text is displayed — downloads work either way.
 
 - **"yt-dlp is not installed"** — run `pip install yt-dlp`.
 - **Merging/converting fails** — make sure ffmpeg is installed and on your PATH.
-- **A download is refused by YouTube** — try again; if it persists, the tool
+- **A download is refused by source** — try again; if it persists, the tool
   may need updating (`pip install -U yt-dlp`).

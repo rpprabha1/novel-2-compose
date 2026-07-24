@@ -1,5 +1,5 @@
 from .assembly import (
-    concat_hard_cut,
+    concat_stream_copy,
     dip_to_black_transition,
     match_duration,
     mux_video_audio,
@@ -14,7 +14,7 @@ from .audio_mix import (
     overlay_narration,
     trim_audio,
 )
-from .ffmpeg_utils import FFmpegError, extract_frames, extract_thumbnail, generate_mood_visual, ken_burns_zoompan, probe_duration_s, probe_resolution
+from .ffmpeg_utils import FFmpegError, extract_frames, extract_thumbnail, generate_mood_visual, ken_burns_zoompan, probe_duration_s, probe_resolution, trim_clip
 from .pixel_art import apply_pixel_art_style
 
 __all__ = [
@@ -25,6 +25,7 @@ __all__ = [
     "ken_burns_zoompan",
     "probe_duration_s",
     "probe_resolution",
+    "trim_clip",
     "apply_pixel_art_style",
     "crossfade_concat",
     "trim_audio",
@@ -33,7 +34,7 @@ __all__ = [
     "measure_integrated_lufs",
     "normalize_loudness",
     "normalize_clip",
-    "concat_hard_cut",
+    "concat_stream_copy",
     "xfade_transition",
     "dip_to_black_transition",
     "match_duration",

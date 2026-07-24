@@ -1,8 +1,16 @@
-# 06_fallback_generation
+# 06_fallback_generation — RETIRED / DISABLED (2026-07-23)
 
-**Type:** CODE by default, HYBRID/AGENT+diffusion opt-in — reclassified 2026-07-18 (see `ARCHITECTURE.md` change log; full spec in `CLAUDE.md` §2, `ARCHITECTURE.md` §2, not repeated here).
+**Status: DISABLED.** This stage is retired as of the 2026-07-23 downloader-lane cutover (author override; see `DECISIONS_LOG.md` and `ARCHITECTURE.md`'s change log). Its `src/run.py` is now a no-op that always returns `COMPLETE` and generates nothing. The folder is kept in place per the author's "retire, keep folders" decision; the prior implementation lives in git history.
 
-## Purpose
+**Why:** the pipeline now sources footage exclusively from the source-free downloader lane (`01_1_downloader` → `shared/downloader_manifest.py` → `01_2_scene_scoring` → `shared/downloader_assets.py`). The author's instruction was to "strictly remove the backup option" — the synthetic fallback is "not needed at all." Beats the downloader lane can't cover simply contribute no asset (no synthetic placeholder is produced).
+
+Everything below this line is **historical record** of what the stage used to do, retained for context and for anyone reviving it from git history.
+
+---
+
+**Type (historical):** CODE by default, HYBRID/AGENT+diffusion opt-in — reclassified 2026-07-18 (see `ARCHITECTURE.md` change log).
+
+## Purpose (historical)
 
 For any beat with no acceptable retrieved asset. **Default CODE path (2026-07-18, visual technique updated 2026-07-23):** a Ken-Burns-animated mood-colored gradient — no text, no diffusion model — via `shared/media.generate_mood_visual()`. Reclassified from AGENT+diffusion after `sd-turbo` repeatedly exhausted RAM/disk loading on a constrained dev machine (6 real failed attempts, see `DECISIONS_LOG.md`). The default visual itself changed 2026-07-23 from an on-screen text card (the beat's own `visual_description`, rendered as literal text) to the current text-free gradient: `09_audio_production`'s TTS already speaks that same text aloud as narration, so displaying it again on screen was redundant and read as a broken slideshow, not video - the author flagged this directly on a real rendered chapter. **Original HYBRID path (still implemented, opt-in):** agent half writes an image-generation prompt from a beat's `visual_description`, tone, and mood tags — never inventing plot detail beyond the beat data; code half calls the `sd-turbo` generation backend and applies Ken Burns zoompan to turn a still into video-length footage.
 
