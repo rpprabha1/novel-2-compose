@@ -4,7 +4,9 @@
 
 ## Purpose
 
-Splits a raw manuscript text file into per-scene text files using the explicit marker convention declared in `run_config.yaml` (`scene_marker_convention.chapter_marker` / `scene_marker`). Normalizes encoding to UTF-8. No interpretation of content — pure text splitting, no judgment.
+Story-text intake for the director-driven flow (step 1). Splits a raw manuscript text file into per-scene text files using the explicit marker convention declared in `run_config.yaml` (`scene_marker_convention.chapter_marker` / `scene_marker`), and normalizes encoding to UTF-8. No interpretation of content — pure text splitting, no judgment.
+
+These per-scene `.txt` files are the normalized story text the rest of the flow reads: by default they feed `02_beat_extraction` (shot division) directly; when the opt-in `screenplay_frontend` flag is on, they feed `02_1_screenplay`, whose output `02_2_scene_extraction` re-segments into film scenes (so marker-based splitting here is retained but no longer the authoritative scene source in that mode).
 
 ## I/O
 

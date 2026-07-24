@@ -20,6 +20,9 @@
         "scene_marker": { "type": "string" }
       }
     },
-    "pov_character": { "type": "string" }
+    "pov_character": { "type": "string" },
+    "screenplay_frontend": { "type": "boolean", "description": "Opt-in (default false): run the 02_1_screenplay -> 02_2_scene_extraction front-end to regenerate the scene set from prose, instead of the marker-split scenes from 01_manuscript_ingestion. Added 2026-07-24." },
+    "base_chapter": { "type": "integer", "minimum": 1, "description": "Fallback chapter number for 02_2_scene_extraction when a source scene_id has no ch<N>_sc<M> form. Optional." },
+    "base_scene": { "type": "integer", "minimum": 1, "description": "Fallback base scene number for 02_2_scene_extraction. Optional." }
   }
 }

@@ -23,6 +23,7 @@ license is attached to any clip. Deterministic ffmpeg + arithmetic, no agent
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -42,12 +43,10 @@ STAGE_NAME = "07_2_narration_shot_mapping"
 TrimFn = Callable[[Path, Path, float, float], None]
 ProbeFn = Callable[[Path], float]
 
-_MAX_WINDOW_REUSE_PASSES = 3
-
 
 def _extract_beat_shots(
     beat_id: str,
-    sources: list[tuple[str, str, float]],
+    candidates: list[tuple[str, str, float, float]],
     total_needed: float,
     shot_len: float,
     min_shot: float,
@@ -57,43 +56,49 @@ def _extract_beat_shots(
     trim: "TrimFn",
     prober: "ProbeFn",
     failures: list[str],
+    global_cursor: dict[str, float],
+    global_used: dict[str, int],
+    state: dict,
 ) -> list[dict]:
-    """Greedily extract short shots covering *total_needed* seconds from *sources*
-    (clip_id, file_ref, duration), round-robin with a per-clip cursor so each
-    shot shows a distinct window (a long clip advances; multiple clips alternate).
+    """Extract short shots covering *total_needed* seconds from this beat's
+    *candidates* (clip_id, file_ref, duration, trim_in), in rank order.
 
-    Extraction happens inline: a clip whose trim fails (undecodable/corrupt input
-    - real clips do occur) is DROPPED for this beat and coverage continues from
-    the remaining clips, so one broken clip never leaves a beat under-covered
-    while decodable footage is still available. Returns the placed shots with
-    their true (ffprobed) durations."""
-    cursors = {cid: 0.0 for cid, _, _ in sources}
+    Selection is diversity-first ACROSS THE WHOLE SCENE, driven by three pieces
+    of global state threaded across every beat (this is what stops the same few
+    clips from carpeting the whole video on a repetitive scene):
+      * `global_used` - each shot picks the beat's LEAST-used candidate (ties
+        broken by CLIP rank), so footage spreads across the pool instead of
+        concentrating on the handful of globally top-scoring clips.
+      * `state['last_clip']` - the immediately previous shot's clip is skipped
+        when any alternative exists, so no two shots in a row share a clip.
+      * `global_cursor` - a per-clip window position that PERSISTS across beats
+        (first use starts at 01_2's best-fit `trim_in`, then advances; wraps to 0
+        when a clip is exhausted), so a reused clip shows a fresh segment rather
+        than the same best-fit frame every time.
+
+    Extraction happens inline: a clip whose trim fails (undecodable/corrupt
+    input) is DROPPED for this beat and coverage continues from the rest. Cache
+    filenames are content-derived (clip + window), so re-running with a changed
+    selection never silently reuses a stale extracted clip. Returns the placed
+    shots with their true (ffprobed) durations."""
+    rank_of = {cid: i for i, (cid, _, _, _) in enumerate(candidates)}
+    by_id = {cid: (ref, dur, trim_in) for cid, ref, dur, trim_in in candidates}
     bad: set[str] = set()
     placed: list[dict] = []
     remaining = total_needed
-    resets = 0
-    rr = 0
     while remaining > 1e-9 and len(placed) < max_shots:
-        live = [(cid, ref, dur) for cid, ref, dur in sources if cid not in bad]
-        if not live:
+        pool = [cid for cid, _, _, _ in candidates if cid not in bad]
+        if not pool:
             break
-        picked = None
-        for _ in range(len(live)):
-            cid, ref, dur = live[rr % len(live)]
-            rr += 1
-            if dur - cursors[cid] >= min_shot:
-                picked = (cid, ref, dur)
-                break
-        if picked is None:  # every live clip's fresh footage is spent
-            resets += 1
-            if resets >= _MAX_WINDOW_REUSE_PASSES:
-                break
-            for cid in cursors:
-                cursors[cid] = 0.0
-            continue
+        prev = state.get("last_clip")
+        choices = [cid for cid in pool if cid != prev] or pool
+        # Least-used-first (spread footage), tie-break by best CLIP rank.
+        cid = min(choices, key=lambda c: (global_used.get(c, 0), rank_of[c]))
+        ref, dur, trim_in = by_id[cid]
 
-        cid, ref, dur = picked
-        cursor = cursors[cid]
+        cursor = global_cursor.get(cid, trim_in)
+        if dur - cursor < min_shot:  # clip exhausted - wrap to draw a fresh pass
+            cursor = 0.0
         available = dur - cursor
         length = min(shot_len, remaining, available)
         # Absorb a tiny trailing remainder rather than emit a sliver clip.
@@ -101,7 +106,10 @@ def _extract_beat_shots(
             length = min(remaining, available)
 
         shot_id = f"{beat_id}_s{len(placed) + 1:02d}"
-        dest = shots_dir / f"{shot_id}.mp4"
+        # Content-derived cache name: window change -> new file -> fresh extract.
+        key = hashlib.sha1(f"{cid}|{round(cursor, 3)}|{round(length, 3)}".encode()).hexdigest()[:10]
+        fname = f"{shot_id}__{key}.mp4"
+        dest = shots_dir / fname
         try:
             if not dest.exists():
                 trim(REPO_ROOT / ref, dest, cursor, length)
@@ -116,10 +124,12 @@ def _extract_beat_shots(
         placed.append({
             "shot_id": shot_id, "clip_id": cid, "file_ref": ref,
             "in_s": round(cursor, 4), "length": round(length, 4),
-            "extracted_file_ref": f"shared/runs/{run_id}/cache/shots/{shot_id}.mp4",
+            "extracted_file_ref": f"shared/runs/{run_id}/cache/shots/{fname}",
             "duration_s": round(actual, 4),
         })
-        cursors[cid] = cursor + length
+        global_cursor[cid] = cursor + length
+        global_used[cid] = global_used.get(cid, 0) + 1
+        state["last_clip"] = cid
         remaining -= actual
     return placed
 
@@ -160,6 +170,9 @@ def main(
     min_shot = se["min_shot_length_s"]
     max_shots = min(se["max_shots_per_beat"], 12)  # 12 = edit_plan.schema.json ceiling
     assets_per_beat = thresholds["downloader_selection"]["assets_per_beat"]
+    # Wider candidate pool per beat for cross-beat variety (see config comment);
+    # falls back to assets_per_beat so small test fixtures behave as before.
+    candidate_pool = se.get("candidate_pool_per_beat") or assets_per_beat
     pacing = run_config.get("pacing", "standard")
     preset = vocab["pacing_presets"].get(pacing) or vocab["pacing_presets"]["standard"]
     target_shot_len = se.get("target_shot_length_s") or float(preset["hold_duration_s"]["max"])
@@ -187,21 +200,31 @@ def main(
     fallback_items: list[FallbackRoutedItem] = []
     extraction_failures: list[str] = []
 
+    # Scene-wide selection state threaded through every beat so footage variety
+    # is a whole-scene property, not a per-beat one (see _extract_beat_shots).
+    global_cursor: dict[str, float] = {}
+    global_used: dict[str, int] = {}
+    select_state: dict = {"last_clip": None}
+
     for beat in beats_data.get("beats", []):
         beat_id = beat["beat_id"]
-        # Resolve this beat's usable source clips (top-N ranked, with a real
-        # duration + locatable file), best-fit first.
-        sources: list[tuple[str, str, float]] = []
-        for rc in ranked_by_beat.get(beat_id, [])[:assets_per_beat]:
+        # This beat's candidate clips: its top-`candidate_pool` ranked clips with
+        # a real duration + locatable file, in rank order (best-fit first).
+        candidates: list[tuple[str, str, float, float]] = []
+        for rc in ranked_by_beat.get(beat_id, [])[:candidate_pool]:
             cid = rc["clip_id"]
             dur = clip_dur.get(cid)
             ref = clip_ref.get(cid) or rc.get("file_ref")
             if dur and dur > 0 and ref:
-                sources.append((cid, ref, float(dur)))
+                # First use of a clip starts at 01_2's best-fit trim window
+                # (trim_in_s); clamp so at least min_shot of footage remains.
+                trim_in = float(rc.get("trim_in_s") or 0.0)
+                trim_in = min(max(trim_in, 0.0), max(float(dur) - min_shot, 0.0))
+                candidates.append((cid, ref, float(dur), trim_in))
 
         narration = narration_by_beat.get(beat_id) or beat.get("est_duration_s") or target_shot_len
 
-        if not sources:
+        if not candidates:
             fallback_items.append(
                 FallbackRoutedItem(
                     item_id=beat_id, reason_code="no_scored_clip",
@@ -217,8 +240,9 @@ def main(
             shot_len = narration / max_shots
 
         placed = _extract_beat_shots(
-            beat_id, sources, narration, shot_len, min_shot, max_shots,
+            beat_id, candidates, narration, shot_len, min_shot, max_shots,
             run_id, shots_dir, trim, prober, extraction_failures,
+            global_cursor, global_used, select_state,
         )
 
         beat_shots: list[dict] = []

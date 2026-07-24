@@ -123,10 +123,30 @@ def test_ranks_clips_per_beat_best_fit_first(tmp_path):
         scores = [c["score"] for c in ranked]
         assert scores == sorted(scores, reverse=True)
         assert all(c["frames_scored"] == 3 for c in ranked)
-    # Source-free: no origin/source/url/license leaked into any clip entry.
+    # Source-free: only neutral fields, no origin/source/url/license leaked.
+    # (trim_in_s/trim_out_s are neutral time offsets, not source identifiers.)
+    allowed = {"clip_id", "file_ref", "score", "rank", "frames_scored", "trim_in_s", "trim_out_s"}
+    forbidden = {"origin", "source", "url", "license", "creator", "attribution"}
     for ranked in by_beat.values():
         for c in ranked:
-            assert set(c) == {"clip_id", "file_ref", "score", "rank", "frames_scored"}
+            assert set(c) <= allowed
+            assert not (set(c) & forbidden)
+            # A best-fit trim window is proposed (durations are in the manifest),
+            # ordered and within the clip.
+            assert 0.0 <= c["trim_in_s"] < c["trim_out_s"]
+
+
+def test_best_fit_window_centers_on_highest_scoring_frame():
+    # 3 frames of a 12s clip sit at t=3, 6, 9 (duration*(i+1)/(n+1)).
+    # Best frame = index 2 (t=9); a 4s window centers there, clamped to [0,12].
+    assert run._best_fit_window([0.1, 0.2, 0.9], duration=12.0, window_len=4.0) == (7.0, 11.0)
+    # Best frame at the start (t=3): window clamped so it doesn't go negative.
+    assert run._best_fit_window([0.9, 0.2, 0.1], duration=12.0, window_len=4.0) == (1.0, 5.0)
+
+
+def test_best_fit_window_clamps_to_short_clip():
+    # A clip shorter than the window yields the whole clip.
+    assert run._best_fit_window([0.5, 0.6], duration=3.0, window_len=4.0) == (0.0, 3.0)
 
 
 def test_frames_per_clip_read_from_config(tmp_path):

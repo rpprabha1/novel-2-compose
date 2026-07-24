@@ -39,6 +39,18 @@ shot_extraction:
   # Hard ceiling on shots per beat (edit_plan.schema.json caps shots at 12);
   # if a beat's narration would need more, shot length is stretched to fit.
   max_shots_per_beat: 12
+  # How many of each beat's top-ranked clips are eligible to be drawn from when
+  # placing that beat's shots. Larger than downloader_selection.assets_per_beat
+  # on purpose: on a repetitive scene (e.g. one long speech) the SAME few clips
+  # score highest for most beats, so a narrow top-3 pool makes the same footage
+  # repeat across the whole video. CLIP scores are near-flat past rank ~3 here,
+  # so widening the pool costs almost no relevance but greatly increases variety.
+  # Selection within the pool is least-recently/least-used-first across the whole
+  # scene, avoiding back-to-back repeats and advancing a per-clip window cursor
+  # so a reused clip shows a fresh segment, not the same one. (Falls back to
+  # downloader_selection.assets_per_beat if unset - keeps small test fixtures
+  # behaving as before.)
+  candidate_pool_per_beat: 10
 
 clip_reranking:
   # Minimum CLIP cosine similarity for a candidate to route to verification (04 -> 05).

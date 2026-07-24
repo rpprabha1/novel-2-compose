@@ -4,7 +4,9 @@
 
 ## Purpose
 
-Interprets one scene's prose into an ordered list of filmable visual beats — the first and most judgment-heavy stage. Decides what counts as one filmable unit vs. two, and flags text with no direct visual analog (interior narration) rather than inventing a visual for it.
+Interprets one scene's prose into an ordered list of filmable visual beats. This is the **shot-division** stage of the director-driven flow (screenplay → scene extraction → *shot division*): a **beat here IS a shot** — the two words are used interchangeably in this pipeline, and the field/id vocabulary stays `beat`/`beat_id` because the whole downstream chain (`01_2_scene_scoring`, `07_2_narration_shot_mapping`, `08_timeline_builder`) keys on it. Decides what counts as one filmable unit vs. two, and flags text with no direct visual analog (interior narration) rather than inventing a visual for it.
+
+Input is one scene of prose: either `01_manuscript_ingestion`'s marker-split scene, or — when the opt-in `screenplay_frontend` flag is on — a scene rendered by `02_2_scene_extraction`. Either way this stage's contract is unchanged.
 
 ## I/O
 

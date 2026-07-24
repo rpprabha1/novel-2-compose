@@ -69,6 +69,38 @@ def _resolve_clip_path(file_ref: str, input_dir: Path, clips_base_dir: Path) -> 
     return None
 
 
+def _default_vocab() -> dict:
+    return yaml.safe_load((REPO_ROOT / "config" / "editorial_vocab.yaml").read_text(encoding="utf-8"))
+
+
+def _window_length_s(thresholds: dict, vocab: dict, run_config: dict) -> float:
+    """The ~4-5s trim window this analyser proposes per clip. Same source as
+    07_2's shot length so the analyser's 'which 4-5 seconds' matches the length
+    07_2 actually extracts: shot_extraction.target_shot_length_s if set, else the
+    active pacing preset's hold_duration_s.max (4.0s for 'standard')."""
+    se = thresholds.get("shot_extraction", {})
+    override = se.get("target_shot_length_s")
+    if override:
+        return float(override)
+    pacing = run_config.get("pacing", "standard")
+    presets = vocab.get("pacing_presets", {})
+    preset = presets.get(pacing) or presets.get("standard") or {}
+    return float(preset.get("hold_duration_s", {}).get("max", 4.0))
+
+
+def _best_fit_window(per_frame_scores: list[float], duration: float, window_len: float) -> tuple[float, float]:
+    """Center a window of window_len on the highest-scoring sampled frame (the
+    most on-topic moment of the clip for this beat), clamped inside [0, duration].
+    Frames are evenly spaced at duration*(i+1)/(n+1) (see shared/media.extract_frames)."""
+    n = len(per_frame_scores)
+    best_i = max(range(n), key=lambda i: per_frame_scores[i])
+    center = duration * (best_i + 1) / (n + 1)
+    length = min(window_len, duration)
+    in_s = min(max(center - length / 2, 0.0), max(duration - length, 0.0))
+    out_s = min(in_s + length, duration)
+    return round(in_s, 4), round(out_s, 4)
+
+
 def main(
     input_dir: Path,
     output_dir: Path,
@@ -77,6 +109,7 @@ def main(
     embedder: Embedder | None = None,
     thresholds: dict | None = None,
     clips_base_dir: Path | None = None,
+    vocab: dict | None = None,
 ) -> StageResponse:
     run_id = run_config["run_id"]
     beats_path = input_dir / "beats.json"
@@ -100,14 +133,17 @@ def main(
     frame_extractor = frame_extractor or extract_frames
     embedder = embedder or _default_embedder(run_id)
     thresholds = thresholds or _default_thresholds()
+    vocab = vocab or _default_vocab()
     n_frames = thresholds["scene_scoring"]["frames_per_clip"]
     clips_base_dir = clips_base_dir if clips_base_dir is not None else REPO_ROOT
+    window_len = _window_length_s(thresholds, vocab, run_config)
 
     frames_cache_dir = REPO_ROOT / "shared" / "runs" / run_id / "cache" / "scene_scoring"
 
     # Phase 1: extract + embed frames once per clip; reuse across every beat.
     clip_frame_vecs: dict[str, list[np.ndarray]] = {}
     clip_file_ref: dict[str, str] = {}
+    clip_duration: dict[str, float] = {}
     clip_order: list[str] = []
     extraction_failures = 0
 
@@ -129,9 +165,16 @@ def main(
             continue
         clip_frame_vecs[clip_id] = vecs
         clip_file_ref[clip_id] = file_ref
+        dur = clip.get("duration_s")
+        if isinstance(dur, (int, float)) and dur > 0:
+            clip_duration[clip_id] = float(dur)
         clip_order.append(clip_id)
 
-    # Phase 2: score every clip against every beat's visual_description.
+    # Phase 2: score every clip against every beat's visual_description, and for
+    # each clip propose a best-fit ~window_len trim window centered on that
+    # clip's highest-scoring frame for this beat (the analyser's "give the
+    # timestamp for trimming" - step 6 of the director flow). Source-free: still
+    # only clip_id/file_ref/score/rank plus the neutral window offsets.
     scores_by_beat = []
     empty_beats = 0
     for beat in beats:
@@ -140,15 +183,20 @@ def main(
         ranked = []
         for clip_id in clip_order:
             vecs = clip_frame_vecs[clip_id]
-            score = sum(cosine_similarity(text_vec, v) for v in vecs) / len(vecs)
-            ranked.append(
-                {
-                    "clip_id": clip_id,
-                    "file_ref": clip_file_ref[clip_id],
-                    "score": round(score, 4),
-                    "frames_scored": len(vecs),
-                }
-            )
+            per_frame = [cosine_similarity(text_vec, v) for v in vecs]
+            score = sum(per_frame) / len(per_frame)
+            entry = {
+                "clip_id": clip_id,
+                "file_ref": clip_file_ref[clip_id],
+                "score": round(score, 4),
+                "frames_scored": len(vecs),
+            }
+            duration = clip_duration.get(clip_id)
+            if duration:
+                trim_in, trim_out = _best_fit_window(per_frame, duration, window_len)
+                entry["trim_in_s"] = trim_in
+                entry["trim_out_s"] = trim_out
+            ranked.append(entry)
         # Stable sort by score desc; clip_order breaks ties deterministically.
         ranked.sort(key=lambda r: r["score"], reverse=True)
         for rank, entry in enumerate(ranked, start=1):

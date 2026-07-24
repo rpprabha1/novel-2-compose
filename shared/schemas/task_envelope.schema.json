@@ -8,7 +8,7 @@
   "properties": {
     "envelope_id": { "type": "string", "format": "uuid" },
     "run_id": { "type": "string" },
-    "stage": { "type": "string", "pattern": "^[0-9]{2}_[a-z_]+$" },
+    "stage": { "type": "string", "pattern": "^[0-9]{2}(_[0-9]+)?_[a-z_]+$" },
     "attempt": { "type": "integer", "minimum": 1 },
     "input_manifest": {
       "type": "array",

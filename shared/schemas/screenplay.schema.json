@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "screenplay.schema.json",
+  "title": "Screenplay",
+  "description": "Output of 02_1_screenplay: one scene's prose dramatized into an ordered list of screenplay elements (sluglines, action, dialogue, narration, transitions). Source-of-scene-structure for 02_2_scene_extraction, which segments these elements into film scenes.",
+  "type": "object",
+  "required": ["run_id", "scene_id", "elements"],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": { "type": "string" },
+    "scene_id": { "type": "string" },
+    "title": { "type": "string", "description": "Optional short title for the source scene" },
+    "elements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["type", "text"],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["slugline", "action", "dialogue", "narration", "transition"],
+            "description": "slugline = INT./EXT. LOCATION - TIME (marks a film-scene boundary); action = what a camera sees; dialogue = spoken lines (needs character); narration = voiceover / narrator text; transition = CUT TO / DISSOLVE etc."
+          },
+          "text": { "type": "string" },
+          "character": { "type": "string", "description": "Speaking character; present for dialogue elements" }
+        }
+      }
+    }
+  }
+}

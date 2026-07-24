@@ -44,9 +44,11 @@ Everything else in `stages/01_1_downloader/` is strictly, permanently off-limits
 
 | Stage | Type | Rationale |
 |---|---|---|
-| 00_coordinator | **AGENT** (orchestration judgment) + code core | Sequencing, envelope routing, and gate enforcement are code; interpreting `NEEDS_INPUT`/`ESCALATE` responses and framing HITL questions for the human is agent work. |
-| 01_manuscript_ingestion | **CODE** | File intake, encoding normalization, chapter/scene splitting by explicit markers. No judgment. |
-| 02_beat_extraction | **AGENT** | Interpreting prose into filmable beats is judgment-shaped. |
+| 00_coordinator | **AGENT** (orchestration judgment) + code core | Sequencing, envelope routing, and gate enforcement are code; interpreting `NEEDS_INPUT`/`ESCALATE` responses and framing HITL questions for the human is agent work. Code core built out 2026-07-24 (`stages/00_coordinator/src/run.py` — every stage invoked/validated/gated/logged through the `Coordinator`; `run_full_novel.py` is now a thin shim). |
+| 01_manuscript_ingestion | **CODE** | Story-text intake, encoding normalization, chapter/scene splitting by explicit markers. No judgment. (Under the opt-in front-end, authoritative scene splitting moves to `02_2_scene_extraction`; this stays the reliable marker-based chunker.) |
+| 02_1_screenplay | **AGENT** | Added 2026-07-24 (opt-in `screenplay_frontend`, default off). Dramatizing scene prose into a screenplay (sluglines/action/dialogue/narration) is judgment-shaped. |
+| 02_2_scene_extraction | **HYBRID** | Added 2026-07-24 (opt-in front-end). AGENT: deciding film-scene boundaries from the screenplay + writing headings/summaries + rendering scene prose. CODE: id/metadata assignment, `.txt` writing, `scenes_manifest.json` build. Scene splitting was pure CODE in `01`; this is the CODE→AGENT reclassification (logged in `ARCHITECTURE.md`). |
+| 02_beat_extraction | **AGENT** | The **shot-division** stage — a beat IS a shot (id vocabulary stays `beat_id` since the downstream chain keys on it). Interpreting a scene into filmable shots is judgment-shaped. |
 | 03_candidate_fetch | **CODE** | API calls through `FootageSource`, caching, rate limiting, license capture. |
 | 04_clip_reranking | **CODE** | CLIP embedding + cosine scoring + threshold routing is math. |
 | 05_retrieval_verification | **CODE** + HITL | Download top-k, frame sampling, re-score: code. Tie-breaking close scores: human, via Coordinator. |

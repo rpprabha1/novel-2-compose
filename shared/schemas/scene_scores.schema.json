@@ -29,7 +29,9 @@
                 "file_ref": { "type": "string" },
                 "score": { "type": "number", "minimum": -1, "maximum": 1, "description": "Mean CLIP cosine similarity across the clip's sampled frames vs. the beat's visual_description." },
                 "rank": { "type": "integer", "minimum": 1 },
-                "frames_scored": { "type": "integer", "minimum": 1 }
+                "frames_scored": { "type": "integer", "minimum": 1 },
+                "trim_in_s": { "type": "number", "minimum": 0, "description": "Proposed best-fit trim window start (seconds into the clip), centered on this beat's highest-scoring sampled frame. Present only when the clip's duration is known. Consumed by 07_2_narration_shot_mapping." },
+                "trim_out_s": { "type": "number", "minimum": 0, "description": "Proposed best-fit trim window end (seconds into the clip). trim_out_s - trim_in_s is ~the pacing shot length (4-5s)." }
               }
             }
           }

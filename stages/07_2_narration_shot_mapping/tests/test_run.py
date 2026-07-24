@@ -167,6 +167,48 @@ def test_alternates_across_multiple_ranked_clips(tmp_path):
     _clean_run_dir()
 
 
+def test_spreads_footage_across_beats_and_advances_reused_windows(tmp_path):
+    """The real fix: on a repetitive scene where every beat ranks the SAME clips
+    top, footage must not carpet the whole video with one clip. Two beats both
+    ranked [c1,c2,c3]; global least-used-first selection should (a) reach clip_003
+    even though no beat put it in the top-2 slot it would have been used from
+    naively, (b) never place the same clip in back-to-back shots, and (c) show a
+    FRESH window when a clip is reused across beats."""
+    _clean_run_dir()
+    input_dir, output_dir = tmp_path / "in", tmp_path / "out"
+    thresholds = {
+        "shot_extraction": {"target_shot_length_s": 4.0, "min_shot_length_s": 1.0,
+                            "max_shots_per_beat": 12, "candidate_pool_per_beat": 3},
+        "downloader_selection": {"assets_per_beat": 3},
+    }
+    _write(input_dir,
+           _beats(("b1", 3.0), ("b2", 3.0)),
+           _scores({"b1": ["clip_001", "clip_002", "clip_003"],
+                    "b2": ["clip_001", "clip_002", "clip_003"]}),
+           _manifest(("clip_001", 100.0), ("clip_002", 100.0), ("clip_003", 100.0)),
+           _audio_mix({"b1": 8.0, "b2": 8.0}))  # 2 shots per beat
+    trim, prober = _fake_extractor()
+    resp = run.main(input_dir, output_dir, RUN_CONFIG, trim=trim, prober=prober, thresholds=thresholds, vocab=VOCAB)
+    assert resp.status.value == "COMPLETE"
+
+    shot_map = json.loads((output_dir / "shot_map.json").read_text(encoding="utf-8"))
+    shots = [s for b in shot_map["beats"] for s in b["shots"]]
+    clip_seq = [s["source_clip_id"] for s in shots]
+
+    # (a) diversity reached all three clips, not just the top two.
+    assert set(clip_seq) == {"clip_001", "clip_002", "clip_003"}
+    # (b) no back-to-back repeat of the same clip.
+    assert all(clip_seq[i] != clip_seq[i + 1] for i in range(len(clip_seq) - 1))
+    # (c) any clip used more than once shows distinct windows (advancing cursor).
+    from collections import defaultdict
+    wins = defaultdict(list)
+    for s in shots:
+        wins[s["source_clip_id"]].append(s["source_in_s"])
+    for cid, ins in wins.items():
+        assert len(ins) == len(set(ins)), f"{cid} reused the same window {ins}"
+    _clean_run_dir()
+
+
 def test_falls_back_to_est_duration_without_audio_mix(tmp_path):
     _clean_run_dir()
     input_dir, output_dir = tmp_path / "in", tmp_path / "out"

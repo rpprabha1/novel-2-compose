@@ -41,7 +41,7 @@ Schema: `shared/schemas/stage_response.schema.json`. Stage → Coordinator, exac
 ```
 
 ## Run Config
-Schema: `shared/schemas/run_config.schema.json`. Lives at `shared/runs/<run_id>/run_config.yaml`; carries ALL story/tone-specific intent so no stage code branches on genre (CLAUDE.md §0 hard rule).
+Schema: `shared/schemas/run_config.schema.json`. Lives at `shared/runs/<run_id>/run_config.yaml`; carries ALL story/tone-specific intent so no stage code branches on genre (CLAUDE.md §0 hard rule). Optional `screenplay_frontend` (boolean, default false, added 2026-07-24) turns on the `02_1_screenplay` → `02_2_scene_extraction` front-end; optional `base_chapter`/`base_scene` give `02_2` fallback numbering when a source scene_id isn't in `ch<N>_sc<M>` form.
 
 ```json
 {
@@ -76,8 +76,42 @@ Schema: `shared/schemas/scenes_manifest.schema.json`. Output of `01_manuscript_i
 }
 ```
 
+## Screenplay
+Schema: `shared/schemas/screenplay.schema.json`. Output of `02_1_screenplay` (added 2026-07-24, opt-in `screenplay_frontend`). One scene's prose dramatized into an ordered list of screenplay `elements` (`slugline`/`action`/`dialogue`/`narration`/`transition`); `dialogue` elements carry a `character`. The sluglines mark the film-scene boundaries `02_2_scene_extraction` reads.
+
+```json
+{
+  "run_id": "run_2026_07_ch1",
+  "scene_id": "ch1_sc1",
+  "title": "The Meeting in the Barn",
+  "elements": [
+    { "type": "slugline", "text": "INT. BIG BARN - NIGHT" },
+    { "type": "action", "text": "The animals gather on the straw as an old boar settles onto a platform." },
+    { "type": "narration", "text": "Word had gone round that old Major had had a strange dream." },
+    { "type": "dialogue", "text": "Comrades, I have little time left to speak to you.", "character": "MAJOR" }
+  ]
+}
+```
+
+## Scene Segmentation
+Schema: `shared/schemas/scene_segmentation.schema.json`. Agent-half output of `02_2_scene_extraction` (added 2026-07-24). The screenplay split into ordered film scenes, each with a `heading`, a `summary`, and the scene's rendered prose `text`. The code half turns this into a canonical `scenes_manifest.json` (see above) + one `.txt` per scene.
+
+```json
+{
+  "run_id": "run_2026_07_ch1",
+  "scenes": [
+    {
+      "heading": "INT. BIG BARN - NIGHT",
+      "summary": "The animals gather to hear old Major describe his dream.",
+      "text": "The farm animals gather on the straw of the big barn as an old boar settles onto a platform.\n\nMajor tells them he has had a strange dream and little time left to share it.",
+      "pov_character": "Major"
+    }
+  ]
+}
+```
+
 ## Beats
-Schema: `shared/schemas/beats.schema.json`. Output of `02_beat_extraction`.
+Schema: `shared/schemas/beats.schema.json`. Output of `02_beat_extraction` (the **shot-division** stage — a beat is a shot; see its README). A beat's input scene is either `01_manuscript_ingestion`'s marker-split scene or, under the opt-in front-end, `02_2_scene_extraction`'s rendered scene.
 
 ```json
 {
@@ -127,7 +161,7 @@ Schema: `shared/schemas/candidates.schema.json`. Output of `03_candidate_fetch`;
 ```
 
 ## Scene Scores
-Schema: `shared/schemas/scene_scores.schema.json`. Output of `01_2_scene_scoring`. Per-beat CLIP-similarity ranking of the `01_1_downloader` lane's clips. **Source-free by design** — each clip entry carries only a neutral `clip_id`, a `file_ref`, and its `score`/`rank`; no `source`/`origin`/`url`/`license`/`creator` (the downloader lane attaches no source anywhere, per the author's instruction). "Ranked scores only": every scored clip appears, no winner is selected and nothing is routed.
+Schema: `shared/schemas/scene_scores.schema.json`. Output of `01_2_scene_scoring`. Per-beat CLIP-similarity ranking of the `01_1_downloader` lane's clips. **Source-free by design** — each clip entry carries only a neutral `clip_id`, a `file_ref`, its `score`/`rank`, and (added 2026-07-24) an optional best-fit `trim_in_s`/`trim_out_s` window; no `source`/`origin`/`url`/`license`/`creator` (the downloader lane attaches no source anywhere, per the author's instruction). "Ranked scores only": every scored clip appears, no winner is selected and nothing is routed. **`trim_in_s`/`trim_out_s`** are the analyser's proposed ~4-5s trim window (step 6 of the director flow), centered on this beat's highest-scoring sampled frame and clamped inside the clip; present only when the clip's duration is known, and consumed by `07_2_narration_shot_mapping` as each clip's starting extraction position.
 
 ```json
 {

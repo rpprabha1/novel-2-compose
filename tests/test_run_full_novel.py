@@ -1,17 +1,20 @@
-"""Regression tests for run_full_novel.py's resolve_music_stage() retry loop.
+"""Regression tests for the Coordinator's resolve_music_stage() retry loop.
 
-Ad-hoc orchestrator script (repo root, not a stage's own src/ - see its own
-module docstring), so this lives in a root-level tests/ dir rather than a
-stage's tests/. Covers the stale-track_ref bug found for real 2026-07-23 (see
-ARCHITECTURE.md/DECISIONS_LOG.md): Stage 09's live music search is re-run
-fresh on every invocation, so a track_ref recorded as this run's decision for
-a cue_id on one attempt can legitimately be absent from a later attempt's
-freshly re-searched candidate list for that same cue_id, and Stage 09
-correctly returns FAILED rather than guessing.
+The orchestration these cover used to live in run_full_novel.py; it now lives in
+the real Coordinator (stages/00_coordinator/src/run.py), so this test loads that
+module directly (its monkeypatch targets - stage_main, _build_music_source,
+log_event, _default_downloader_invoke - must be attributes of the module that
+defines resolve_music_stage/download_scene_queries). Covers the stale-track_ref
+bug found for real 2026-07-23 (see ARCHITECTURE.md/DECISIONS_LOG.md): Stage 09's
+live music search is re-run fresh on every invocation, so a track_ref recorded
+as this run's decision for a cue_id on one attempt can legitimately be absent
+from a later attempt's freshly re-searched candidate list for that same cue_id,
+and Stage 09 correctly returns FAILED rather than guessing.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -19,7 +22,16 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-import run_full_novel as orch  # noqa: E402
+
+def _load_coordinator():
+    path = REPO_ROOT / "stages" / "00_coordinator" / "src" / "run.py"
+    spec = importlib.util.spec_from_file_location("coordinator_under_test", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+orch = _load_coordinator()
 from shared.envelopes import ErrorInfo, NeedsInputItem, StageResponse, StageStatus  # noqa: E402
 
 
